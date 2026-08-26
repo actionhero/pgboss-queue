@@ -119,3 +119,4 @@ A compiling package, a shared `specHelper`, and CI that will run every subsequen
 - 2026-08-26: The `node-package` CI step must invoke `node` directly. `bun run test:node-package` can still shell out to `node`, but the workflow should not go through Bun for that check.
 - 2026-08-26: `noImplicitAny` is set on both `tsconfig.json` and `tsconfig.test.json` so relaxing `strict` later still bans implicit `any` in src and tests.
 - 2026-08-26: Required checks on `main` should be `complete` and `Cursor Bugbot`. The cloud agent GitHub token is not a repo admin (403 on branch protection and rulesets), so a maintainer must set that in the GitHub UI.
+- 2026-08-26: Phase 2 filled `specHelper.cleanup()` / `migrate()` / `dropSchema()` and added `pg-boss`. Smoke test remains valid; connection suite uses `*.test.ts` filenames because Bun will not discover bare `connection.ts`.

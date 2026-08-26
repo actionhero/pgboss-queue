@@ -1,6 +1,6 @@
 # Phase 2 — Connection, schema, and automigrate primitives
 
-**Status:** not-started  
+**Status:** done  
 **Depends on:** Phase 1
 
 ## Goal
@@ -66,7 +66,7 @@ export interface MultiWorkerOptions extends WorkerOptions {
 }
 ```
 
-`Queue` / `Worker` / `Scheduler` still take `{ connection: ConnectionOptions, ... }` to match node-resque call sites.
+`Queue` / `Worker` / `Scheduler` still take `{ connection: ConnectionOptions, ... }` to match node-resque call sites. Option interfaces are exported from `src/core/connection.ts` / `src/index.ts` now so later phases do not redefine them.
 
 ### Mapping help (document in JSDoc + README)
 
@@ -77,12 +77,14 @@ export interface MultiWorkerOptions extends WorkerOptions {
 | `{ namespace: "resque" }` | `{ schema: "resque" }` (legal SQL identifier only) |
 | `{ namespace: ["a","b"] }` | not supported; use one schema name |
 
+Runtime rejection: `pkg`, `redis`, and numeric `database` throw from the `Connection` constructor.
+
 ## `Connection` class
 
 Port `src/core/connection.ts` *behavior*, not Redis:
 
-- `connect()` — create pool unless `pool` was provided; construct a `PgBoss` instance with `{ connectionString | host…, schema, migrate: false, supervise: false, schedule: false }`. Call `boss.start()` so the client is usable **without** migrating (pg-boss allows this when schema already exists; if it does not, start() may try to install — **disable migrate** and catch "schema missing" until `migrate()` runs). Verify against pg-boss version actually used: if `start()` always migrates, use the constructor `migrate: false` (documented: throws if schema absent). Tests that only connect after migrate are fine.
-- `end()` — `boss.stop({ graceful: true })`; `pool.end()` only if we created the pool.
+- `connect()` — create pool unless `pool` was provided; always wrap the pool as pg-boss `db.executeSql` so `connection.pool` is a real `pg.Pool`. Construct `PgBoss` with `{ db, schema, migrate: false, supervise: false, schedule: false, application_name }`. Call `boss.start()` when the schema is installed; if pg-boss reports "not installed", leave the pool connected so `migrate()` can run, then start boss after migrate.
+- `end()` — `boss.stop({ graceful: true, close: false })` (we own / borrow the pool); `pool.end()` only if we created the pool; remove forwarded `error` listeners.
 - `connected` boolean
 - Event `error` forwarded from pool and pg-boss
 - `key(...parts)` — **keep** as a helper for lock key strings (`["lock", func, queue, args].join(":")`) stored in `locks.key`. Do not prefix Redis-style. Tests that assert `resque-test-0:thing` are Redis-only (Phase 8 skip).
@@ -90,9 +92,9 @@ Port `src/core/connection.ts` *behavior*, not Redis:
 Expose:
 
 - `connection.boss: PgBoss`
-- `connection.pool: pg.Pool` (from boss or provided)
+- `connection.pool: pg.Pool` (owned or provided)
 - `connection.schema: string`
-- `connection.query<T>(text, values)` — parameterized, always-quoted schema interpolation only via validated identifier
+- `connection.query<T>(text, values)` — parameterized; schema identifiers are validated once and interpolated only after `assertSchema`
 
 ```ts
 async migrate(): Promise<void>
@@ -101,10 +103,11 @@ async migrate(): Promise<void>
 `migrate()` is idempotent:
 
 1. `CREATE SCHEMA IF NOT EXISTS {schema}`
-2. pg-boss migrate (instantiate a short-lived PgBoss with `migrate: true` **or** `boss.start()` on a migrator instance). Prefer the pg-boss CLI-equivalent API used in-process.
-3. Apply our metadata DDL (`CREATE TABLE IF NOT EXISTS`).
+2. Short-lived `PgBoss` with `{ db, schema, migrate: true, supervise: false, schedule: false }` → `start()` / `stop({ close: false })`
+3. Apply our metadata DDL (`CREATE TABLE IF NOT EXISTS` + indexes)
+4. `boss.start()` on the long-lived instance if it was waiting on install
 
-Workers never call this. Scheduler leader will. `specHelper` will call it in `beforeAll`.
+Workers never call this. Scheduler leader will. `specHelper.migrate()` calls it in `beforeAll`.
 
 ## Metadata DDL (ours)
 
@@ -143,8 +146,8 @@ CREATE TABLE IF NOT EXISTS {schema}.pgrq_stats (
 
 Indexes:
 
-- `pgrq_workers (ping_at)`
-- `pgrq_locks (expires_at)`
+- `pgrq_workers_ping_at_idx` on `pgrq_workers (ping_at)`
+- `pgrq_locks_expires_at_idx` on `pgrq_locks (expires_at)`
 
 Lock helpers on `Connection` (used by plugins and leader):
 
@@ -158,7 +161,7 @@ decrStat(name: string, by?: number): Promise<void>
 getStats(): Promise<Record<string, number>>
 ```
 
-Expired lock rows are treated as absent (`DELETE` where `expires_at < now()` on read, and by the scheduler sweeper).
+Expired lock rows are treated as absent (`DELETE` where `expires_at < now()` on read; `setLockNx` may take over an expired row via `ON CONFLICT … WHERE expires_at < now()`).
 
 Leader helpers:
 
@@ -171,7 +174,7 @@ releaseLeader(name: string): Promise<boolean>
 currentLeader(): Promise<string | null>
 ```
 
-Use a single transaction. This is the Redis `SET NX EX` + refresh-if-mine pattern from `scheduler.tryForLeader`.
+`tryLeader` uses a single transaction. This is the Redis `SET NX EX` + refresh-if-mine pattern from `scheduler.tryForLeader`.
 
 ## pg-boss constructor flags (every instance)
 
@@ -183,9 +186,13 @@ Use a single transaction. This is the Redis `SET NX EX` + refresh-if-mine patter
 
 We do not want two maintenance systems. pg-boss's built-in delete/archive would race our retention policy and might drop failed jobs.
 
+Dependency: `pg-boss` (installed in this phase; currently `^12`).
+
 ## Tests (this phase)
 
-Port in **this PR** (Phase 8 matrix: `connection.ts` + `connectionError.ts`). CI from Phase 1 must stay green.
+Port in **this PR** (Phase 8 matrix: `connection.test.ts` + `connectionError.test.ts`). CI from Phase 1 must stay green.
+
+Bun's test runner only discovers `*.test.ts` / `*.spec.ts` (and `_test_` / `_spec_` variants). Files live at `__tests__/core/connection.test.ts` and `__tests__/core/connectionError.test.ts` so `bun test` picks them up; **describe/test titles** still match node-resque.
 
 Port-inspired plus the Adapt rows from Phase 8:
 
@@ -193,12 +200,13 @@ Port-inspired plus the Adapt rows from Phase 8:
 - connect with discrete `host/port/user/password/database`
 - connect with shared `pool` (ending Connection does not end the pool)
 - reject illegal `schema` (`pgboss-queue`, `public; drop`, empty)
+- reject Redis options (`pkg`, `redis`, numeric `database`)
 - `migrate()` creates pg-boss `job` table and `pgrq_*` tables
 - second `migrate()` is a no-op
 - `tryLeader` : only one of two connections wins; after expiry the other wins
-- `setLockNx` / expire / `delLock`
-- connectionError (bad host)
-- fill `specHelper.cleanup()` to truncate `pgrq_*` (and `job` once pg-boss exists)
+- `setLockNx` / expire / `delLock` (+ stats smoke)
+- connectionError (bad host / port `127.0.0.1:1`)
+- `specHelper.cleanup()` truncates `pgrq_*` and `job` (CASCADE); `specHelper.migrate()` / `dropSchema()` available
 
 Do not defer these to Phase 8.
 
@@ -209,6 +217,7 @@ Do not defer these to Phase 8.
 - No job enqueue yet (that is Phase 3)
 - **`test.yaml` is green on the PR** (Postgres job runs the new files)
 - `specHelper.cleanup()` leaves no leftover rows
+- `node scripts/assert-node-package.mjs` imports `Connection` from compiled `dist`
 
 ## Next phase needs
 
@@ -216,4 +225,9 @@ Do not defer these to Phase 8.
 
 ## Lessons learned
 
-_None yet._
+- 2026-08-26: Bun only discovers test files whose names contain `.test` / `.spec` / `_test_` / `_spec_`. Porting node-resque's `__tests__/core/connection.ts` verbatim meant `bun test` silently ran only `smoke.test.ts`. Use `connection.test.ts` / `connectionError.test.ts` and keep the upstream `describe`/`test` titles; document the path rename in Phase 8.
+- 2026-08-26: Always pass a `pg.Pool` into pg-boss via `db: { executeSql }`. That keeps `connection.pool` typed as `Pool`, makes BYO-pool `end()` semantics obvious, and requires `boss.stop({ close: false })` so we do not double-close the pool.
+- 2026-08-26: With `migrate: false`, `boss.start()` throws `pg-boss is not installed` before migrate. `connect()` treats that as "pool ready, boss deferred" so `migrate()` can install, then starts the long-lived boss.
+- 2026-08-26: pg-boss is a named ESM export (`import { PgBoss } from "pg-boss"`), not a default export. Migrator instances use `migrate: true` + `supervise: false` + `schedule: false`.
+- 2026-08-26: Version bumped `0.0.1` → `0.1.0` (first user-facing API: `Connection`).
+- 2026-08-26: Node ESM (`"type": "module"`) requires relative import specifiers with `.js` extensions in emitted `dist/` (e.g. `from "./core/connection.js"`). Without them, `node scripts/assert-node-package.mjs` fails with `ERR_MODULE_NOT_FOUND` even though `tsc` and Bun tests pass.

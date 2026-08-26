@@ -129,4 +129,4 @@ Recommended split:
 
 ## Lessons learned
 
-_None yet._
+- 2026-08-26: Bun requires `*.test.ts` filenames for discovery; Phase 3 ports should use `__tests__/core/queue.test.ts` (not bare `queue.ts`) while keeping node-resque describe/test titles.
