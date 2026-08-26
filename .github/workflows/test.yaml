@@ -59,7 +59,8 @@ jobs:
           node-version-file: .nvmrc
       - run: bun install --frozen-lockfile
       - run: bun run build
-      - run: bun run test:node-package
+      - run: node --version
+      - run: node scripts/assert-node-package.mjs
 
   complete:
     if: always()

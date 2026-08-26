@@ -50,7 +50,7 @@ This is a **Bun + TypeScript** project. Use `bun`, never `npm` or `npx`, for ins
 ```bash
 bun install                 # install
 bun test                    # bun:test, needs Postgres
-bun run test:node-package   # Node 26 imports dist/ (run after build)
+node scripts/assert-node-package.mjs  # after build; must use Node, not bun
 bun run lint                # biome check
 bun run format              # biome write
 bun run build               # tsc of src → dist, plus test typecheck
@@ -135,7 +135,7 @@ Do **not** accept `pkg: "ioredis"`, `redis: Redis`, or `database: number`. Those
 - **JSDoc on every public class, method, and exported type.** `@param` for each parameter (including edge cases), `@returns` when non-obvious, `@throws` when applicable. Match node-resque's documented Queue methods.
 - **No Python.** New scripts, CLIs, and tooling are Bun + TypeScript.
 - **Biome** for format/lint (keryx-style), not Prettier.
-- **Tests use `bun:test`**, not Jest. Port node-resque tests faithfully: same `describe` / `test` names, same assertions, Postgres `specHelper` instead of Redis. Node must still be able to import the compiled package (`bun run test:node-package`); do not run the Bun suite on Node.
+- **Tests use `bun:test`**, not Jest. Port node-resque tests faithfully: same `describe` / `test` names, same assertions, Postgres `specHelper` instead of Redis. Node must still be able to import the compiled package (`node scripts/assert-node-package.mjs`); do not run the Bun suite on Node.
 - **Every behavior change ships with tests.** A PR with no test changes is a red flag unless it is docs-only.
 - **Do not add dependencies** unless a phase plan names them. Expected runtime deps: `pg-boss`, `pg`. Dev: `typescript`, `@types/pg`, `biome`, `bun` types.
 

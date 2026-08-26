@@ -77,7 +77,7 @@ Do **not** ship only `expect(true).toBe(true)`. Tests use `bun:test`. Node compa
 `.github/workflows/test.yaml` is the product gate from this PR onward. Jobs: `lint`, `build`, `test` (Postgres 16 service, **Bun `bun:test`**), `node-package` (Node 26 imports the compiled package), `complete`.
 
 - `test`: `bun run test` with `DATABASE_URL=postgres://postgres:postgres@localhost:5432/pgboss_queue_test`
-- `node-package`: `actions/setup-node` from `.nvmrc` (26), `bun run build`, `bun run test:node-package` (no Postgres)
+- `node-package`: `actions/setup-node` from `.nvmrc` (26), `bun run build`, then **`node scripts/assert-node-package.mjs`** (not `bun run`; no Postgres)
 
 See the workflow file for the YAML. Do not duplicate a second test pipeline in Phase 10.
 
@@ -98,7 +98,7 @@ Rules:
 - `bun run build` emits `dist/`
 - `bun run lint` is clean
 - `DATABASE_URL` pointing at a local Postgres + `bun test` is green
-- `bun run build` + `bun run test:node-package` is green on Node 26
+- `bun run build` + `node scripts/assert-node-package.mjs` is green on Node 26
 - **GitHub Actions on this PR is green** (lint, build, Bun Postgres tests, Node package import, `complete`)
 - Smoke test fails if Postgres is down or `DATABASE_URL` is missing
 - No runtime exports claimed that do not exist
@@ -116,3 +116,4 @@ A compiling package, a shared `specHelper`, and CI that will run every subsequen
 - 2026-08-26: Test matrix runs the same `node:test` files on Bun and Node 26. `bun:test` cannot run on Node, so the suite is `node:test` + `node:assert/strict` rather than `bun:test`.
 - 2026-08-26: Ban `any` in the whole tree: `noImplicitAny` in `tsconfig.json` (explicit even though `strict` already implies it), `tsc --noEmit -p tsconfig.test.json` so tests are included, and Biome `noExplicitAny` as an error. `tsc` has no `noExplicitAny` flag.
 - 2026-08-26: Reverted the suite to `bun:test`. Node coverage is `scripts/assert-node-package.mjs` (import compiled `exports` on Node 26, not a second copy of the Postgres tests).
+- 2026-08-26: The `node-package` CI step must invoke `node` directly. `bun run test:node-package` can still shell out to `node`, but the workflow should not go through Bun for that check.
