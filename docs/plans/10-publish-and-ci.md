@@ -94,7 +94,7 @@ jobs:
 
 `package.json` must include `"files": ["dist", "README.md", "LICENSE"]` so we do not publish tests or plans.
 
-The Phase 1 `test` job already matrices Bun and Node 26 against Postgres. Do not add a second matrix here.
+The Phase 1 `test` job runs `bun:test` against Postgres. The `node-package` job imports compiled `dist/` on Node 26. Do not add a second suite matrix here.
 
 ## Versioning policy (CLAUDE.md)
 
@@ -134,3 +134,4 @@ README (user-facing): GitHub Test workflow badge (the Phase 1 workflow), npm ver
 
 - 2026-08-26 (plan): Test CI is Phase 1. This phase is only Pages + npm publish.
 - 2026-08-26: Phase 1 already matrices Bun and Node 26 in `test.yaml`. Example runs use `DATABASE_URL`; there is no repo `docker-compose.yml`.
+- 2026-08-26: Phase 1 dropped the suite matrix. `test` is Bun; `node-package` only imports `dist/` on Node 26.

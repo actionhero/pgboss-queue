@@ -45,15 +45,15 @@ A PR with no `docs/plans/` diff is only OK when the change is truly unrelated (t
 
 ## Tooling (once Phase 1 exists)
 
-This is a **Bun + TypeScript** project. Use `bun`, never `npm` or `npx`, for install/lint/build. Use `bunx` if you need a package runner. Tests are `node:test` so CI can run them on both Bun and Node. PRs must stay green on `.github/workflows/test.yaml` (lint, build, Bun + Node Postgres matrix).
+This is a **Bun + TypeScript** project. Use `bun`, never `npm` or `npx`, for install/lint/build/test. Use `bunx` if you need a package runner. PRs must stay green on `.github/workflows/test.yaml` (lint, build, `bun test` against Postgres, Node package import).
 
 ```bash
 bun install                 # install
-bun test                    # node:test via bun, needs Postgres
-bun run test:node           # same files on Node 26+
+bun test                    # bun:test, needs Postgres
+bun run test:node-package   # Node 26 imports dist/ (run after build)
 bun run lint                # biome check
 bun run format              # biome write
-bun run build               # tsc / bun build of src → dist
+bun run build               # tsc of src → dist, plus test typecheck
 bun docs:dev                # VitePress (Phase 9)
 ```
 
@@ -135,7 +135,7 @@ Do **not** accept `pkg: "ioredis"`, `redis: Redis`, or `database: number`. Those
 - **JSDoc on every public class, method, and exported type.** `@param` for each parameter (including edge cases), `@returns` when non-obvious, `@throws` when applicable. Match node-resque's documented Queue methods.
 - **No Python.** New scripts, CLIs, and tooling are Bun + TypeScript.
 - **Biome** for format/lint (keryx-style), not Prettier.
-- **Tests use `node:test`**, not Jest, so the same files run on Bun and Node. Port node-resque tests faithfully: same `describe` / `test` names, same assertions, Postgres `specHelper` instead of Redis.
+- **Tests use `bun:test`**, not Jest. Port node-resque tests faithfully: same `describe` / `test` names, same assertions, Postgres `specHelper` instead of Redis. Node must still be able to import the compiled package (`bun run test:node-package`); do not run the Bun suite on Node.
 - **Every behavior change ships with tests.** A PR with no test changes is a red flag unless it is docs-only.
 - **Do not add dependencies** unless a phase plan names them. Expected runtime deps: `pg-boss`, `pg`. Dev: `typescript`, `@types/pg`, `biome`, `bun` types.
 

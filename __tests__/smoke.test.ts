@@ -1,18 +1,17 @@
-import assert from "node:assert/strict";
-import { after, describe, test } from "node:test";
-import { connect, disconnect } from "./utils/specHelper.ts";
+import { afterAll, describe, expect, test } from "bun:test";
+import { connect, disconnect } from "./utils/specHelper";
 
 describe("Postgres smoke test", () => {
-  after(disconnect);
+  afterAll(disconnect);
 
   test("DATABASE_URL is defined", () => {
-    assert.ok(process.env.DATABASE_URL);
+    expect(process.env.DATABASE_URL).toBeDefined();
   });
 
   test("SELECT 1 returns 1", async () => {
     const pool = await connect();
     const result = await pool.query<{ value: number }>("SELECT 1 AS value");
 
-    assert.equal(result.rows[0]?.value, 1);
+    expect(result.rows[0]?.value).toBe(1);
   });
 });

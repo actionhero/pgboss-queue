@@ -28,10 +28,6 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        runtime: [bun, node]
     services:
       postgres:
         image: postgres:16
@@ -48,25 +44,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v4
-        if: matrix.runtime == 'node'
-        with:
-          node-version-file: .nvmrc
       - run: bun install --frozen-lockfile
-      - name: Test with Bun
-        if: matrix.runtime == 'bun'
-        run: bun run test
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/pgboss_queue_test
-      - name: Test with Node
-        if: matrix.runtime == 'node'
-        run: bun run test:node
+      - run: bun run test
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/pgboss_queue_test
 
+  node-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run test:node-package
+
   complete:
     if: always()
-    needs: [lint, build, test]
+    needs: [lint, build, test, node-package]
     runs-on: ubuntu-latest
     steps:
       - name: Require all test jobs to pass

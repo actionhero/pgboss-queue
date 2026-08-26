@@ -53,4 +53,5 @@ pg-boss `localConcurrency` is **not** a substitute. MultiWorker must spawn real 
 ## Lessons learned
 
 - 2026-08-26: Phase 1 runs tests with `node:test`, not `bun:test`. Do not assume Bun-only retry APIs when this phase is implemented.
+- 2026-08-26: Phase 1 reverted to `bun:test`. Bun retry APIs are available again; Node is only the compiled-package import check.
 
