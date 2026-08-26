@@ -129,3 +129,7 @@ Add (not in node-resque, but required for "multi-worker"):
 ## Next phase needs
 
 Worker rows, pings, `forceCleanWorker`, fetch/complete/fail.
+
+## Lessons learned
+
+_None yet._

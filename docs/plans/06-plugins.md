@@ -83,3 +83,7 @@ Also port `__tests__/core/queue.ts` `describe("locks")` if not already green.
 ## Next
 
 Phase 7 is independent. Phase 8 includes these tests in the matrix.
+
+## Lessons learned
+
+_None yet._

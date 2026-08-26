@@ -124,3 +124,7 @@ Recommended split:
 ## Next phase needs
 
 `enqueue` / `queued` / `length` / failed helpers / worker table accessors.
+
+## Lessons learned
+
+_None yet._

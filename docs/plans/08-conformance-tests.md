@@ -148,3 +148,7 @@ Optional script `scripts/check-conformance.ts` (Bun): clone node-resque test tit
 ## Next
 
 Docs site can describe a real API. Publish workflow can trust tests.
+
+## Lessons learned
+
+_None yet._

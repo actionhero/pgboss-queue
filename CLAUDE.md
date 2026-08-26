@@ -30,6 +30,19 @@ User-facing docs live in `README.md` (and later the VitePress site). Do not put 
 
 The implementation spec is `docs/plans/*` plus this file. Library source, tests, VitePress, and CI land in later phases. When a phase is complete, update that plan's **Status** line to `done` and move on.
 
+## Keep the phase plans current (required)
+
+`docs/plans/` is a living spec, not a frozen brief. **Every PR that implements or changes behavior covered by a phase must update that phase file in the same PR.** This is mandatory — a code-only PR that leaves a stale plan is incomplete.
+
+When you touch code, tests, CI, or docs that belong to a phase (or that invalidate something that phase assumed):
+
+1. **Edit the phase doc** so it still describes what we actually ship: APIs, table names, option defaults, test names, skip reasons, workflow filenames, etc. If the plan was wrong, change the plan and say why — do not silently implement a shortcut.
+2. **Append to `## Lessons learned`** on every affected phase. That section starts empty on purpose. Add dated, concrete bullets (what we tried, what broke, what we decided). Do not rewrite history; do not delete old entries.
+3. **Update Status** (`not-started` → `in-progress` → `done`) when that is true.
+4. If work spans phases (e.g. a Queue bug found while writing Worker tests), update **all** relevant phase files, each with its own lessons-learned note.
+
+A PR with no `docs/plans/` diff is only OK when the change is truly unrelated (typo in README prose, lockfile-only, etc.). If you are unsure, update the phase.
+
 ## Tooling (once Phase 1 exists)
 
 This is a **Bun + TypeScript** project. Use `bun`, never `npm` or `npx`, for install/test/run. Use `bunx` if you need a package runner.
@@ -155,7 +168,7 @@ Follow keryx: bump `version` in `package.json` on every user-facing PR (patch fo
 
 - One phase per PR when possible. Do not combine "invent MultiWorker" with "stand up VitePress".
 - Link the plan file in the PR body (`Implements docs/plans/0X-….md`).
-- Do not rewrite plans to match an implementation shortcut. If the plan is wrong, update the plan in the same PR and say why.
+- Update the phase document(s) and **`## Lessons learned`** in the same PR (see **Keep the phase plans current** above). Do not leave plans stale.
 
 ## Upstream references (read, don't vendor)
 

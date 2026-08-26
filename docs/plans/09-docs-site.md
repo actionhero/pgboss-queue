@@ -135,3 +135,7 @@ Short sentences. No "simply". Code samples TypeScript. Mirror node-resque event 
 ## Next
 
 Phase 10 wires docs deploy next to npm publish.
+
+## Lessons learned
+
+_None yet._

@@ -92,3 +92,7 @@ Do **not** add publish or docs deploy yet.
 ## Next phase needs
 
 A compiling package, CI, and a running Postgres. Phase 2 adds `Connection` and schema.
+
+## Lessons learned
+
+_None yet._

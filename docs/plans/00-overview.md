@@ -168,3 +168,7 @@ pgboss-queue/
 ## Success metric
 
 Phase 8's matrix is green: every **relevant** node-resque test exists under the same name and passes against Postgres. Docs site builds. `npm publish` workflow is in place. A Keryx follow-up can replace `PgBossBackend` with this package without changing `api.actions.enqueue*`.
+
+## Lessons learned
+
+_None yet._

@@ -155,3 +155,7 @@ Add:
 ## Next phase needs
 
 Stable leader + worker cleaning. Plugins can land in parallel with leftover scheduler polish.
+
+## Lessons learned
+
+_None yet._

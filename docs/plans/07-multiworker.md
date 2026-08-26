@@ -46,3 +46,7 @@ Port `examples/multiWorker.ts` to Postgres connection details.
 ## Note
 
 pg-boss `localConcurrency` is **not** a substitute. MultiWorker must spawn real `Worker` objects so plugins, names, and heartbeats stay per-worker.
+
+## Lessons learned
+
+_None yet._

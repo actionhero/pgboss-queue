@@ -206,3 +206,7 @@ Port-inspired, not full queue tests yet:
 ## Next phase needs
 
 `Connection.connect`, `query`, `boss`, `migrate`, lock/stat/leader helpers.
+
+## Lessons learned
+
+_None yet._

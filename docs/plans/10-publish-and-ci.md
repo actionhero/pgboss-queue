@@ -190,3 +190,7 @@ README: GitHub Test workflow badge, npm version, license.
 - Keryx consumes `pgboss-queue` instead of in-tree `PgBossBackend`
 - Optional admin UI package (resque-admin against SQL)
 - `LISTEN/NOTIFY` as an opt-in latency flag (`useListenNotify`)
+
+## Lessons learned
+
+_None yet._
