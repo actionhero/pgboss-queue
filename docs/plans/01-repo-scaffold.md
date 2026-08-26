@@ -86,7 +86,7 @@ Rules:
 - Do **not** wait for Phase 10 to add this file. Phase 10 is npm publish + GitHub Pages only.
 - Do **not** add a `docs` job yet (VitePress does not exist). Phase 9 appends it.
 - `complete` must fail the workflow if lint, build, or test failed.
-- Branch protection (when maintainers can set it): require `complete`.
+- Branch protection (maintainer UI; this agent cannot set it): require `complete` and `Cursor Bugbot`.
 
 ### README / CLAUDE.md
 
