@@ -79,7 +79,7 @@ Do **not** add publish or docs deploy yet.
 
 ### README / CLAUDE.md
 
-Already written at repo root. Update the Development section if script names differ. Do not rewrite the architecture.
+`README.md` is **user-facing only** (install, connection, Queue/Worker/Scheduler, plugins). Do not add plan links, phase tables, or "not implemented yet" banners. `CLAUDE.md` and `docs/plans/` are for implementers. If you add npm scripts, mention the ones users care about (`install`, the import path) in the README; keep `bun test` / compose in contributor docs or the guide.
 
 ## Acceptance criteria
 

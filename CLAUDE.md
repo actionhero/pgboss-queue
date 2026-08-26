@@ -26,7 +26,9 @@ This is an Actionhero project (sibling of [node-resque](https://github.com/actio
 
 ## Current state
 
-The repo currently holds the plan (README, this file, `docs/plans/*`). Library source, tests, VitePress, and CI land in later phases. When a phase is complete, update that plan's **Status** line to `done` and move on.
+User-facing docs live in `README.md` (and later the VitePress site). Do not put implementation-plan links, phase tables, or "status: planning" notes in the README.
+
+The implementation spec is `docs/plans/*` plus this file. Library source, tests, VitePress, and CI land in later phases. When a phase is complete, update that plan's **Status** line to `done` and move on.
 
 ## Tooling (once Phase 1 exists)
 
