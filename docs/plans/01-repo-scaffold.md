@@ -28,8 +28,8 @@ CI must exist **before** Queue/Worker code. An empty `expect(true)` that never o
   - `scripts`: `"test": "bun test --max-concurrency=1"`, `"test:node": "node --experimental-strip-types --test-concurrency=1 --test './__tests__/**/*.test.ts'"`, `build`, `lint`, `format` (docs scripts wait for Phase 9)
   - `devDependencies`: `typescript`, `@types/node`, `@types/pg`, `@biomejs/biome`, `@types/bun`
   - `dependencies`: `pg` now (smoke test uses it). Add `pg-boss` in Phase 2 if you want to keep this PR smaller — either is fine as long as CI is green.
-- `tsconfig.json` — `strict`, `ES2022`, `moduleResolution: bundler` or `nodenext`, `declaration`, `outDir: dist`, `rootDir: src`
-- `biome.json` — match keryx reasonably (indent 2, no unused imports)
+- `tsconfig.json` — `strict`, `noImplicitAny: true`, `ES2022`, `moduleResolution: bundler` or `nodenext`, `declaration`, `outDir: dist`, `rootDir: src`. `tsconfig.test.json` typechecks `__tests__` with `noEmit` (so implicit `any` in tests fails `build` too).
+- `biome.json` — match keryx reasonably (indent 2, no unused imports). `suspicious/noExplicitAny` is `error` so `: any` and `as any` fail `lint`.
 - `.gitignore` — `node_modules`, `dist`, `.env`, `docs/.vitepress/dist`, `*.log`
 - `LICENSE` — Apache-2.0
 - `.nvmrc` or `.node-version` — `26`
@@ -114,3 +114,4 @@ A compiling package, a shared `specHelper`, and CI that will run every subsequen
 - 2026-08-26: `bun test --concurrency=1` is not a Bun flag (`bun test --help` has `--concurrent` and `--max-concurrency`, not `--concurrency`). Bun still accepted the unknown flag and ran anyway. Use `--max-concurrency=1` on Bun and `--test-concurrency=1` on `node --test`. Tests are sequential by default unless `--concurrent` / `--parallel` is set.
 - 2026-08-26: Dropped `docker-compose.yml`. CI Postgres is a GitHub Actions service; locally `DATABASE_URL` is enough. Compose would only wrap a database this repo does not otherwise orchestrate.
 - 2026-08-26: Test matrix runs the same `node:test` files on Bun and Node 26. `bun:test` cannot run on Node, so the suite is `node:test` + `node:assert/strict` rather than `bun:test`.
+- 2026-08-26: Ban `any` in the whole tree: `noImplicitAny` in `tsconfig.json` (explicit even though `strict` already implies it), `tsc --noEmit -p tsconfig.test.json` so tests are included, and Biome `noExplicitAny` as an error. `tsc` has no `noExplicitAny` flag.

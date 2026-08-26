@@ -131,7 +131,7 @@ Do **not** accept `pkg: "ioredis"`, `redis: Redis`, or `database: number`. Those
 
 ## Coding conventions
 
-- **TypeScript strict.** No `as any`. Use `@ts-expect-error` with a comment when the type system cannot express something.
+- **TypeScript strict (`noImplicitAny`).** No `any` and no `as any`. Biome `noExplicitAny` is an error. Use `@ts-expect-error` with a comment when the type system cannot express something.
 - **JSDoc on every public class, method, and exported type.** `@param` for each parameter (including edge cases), `@returns` when non-obvious, `@throws` when applicable. Match node-resque's documented Queue methods.
 - **No Python.** New scripts, CLIs, and tooling are Bun + TypeScript.
 - **Biome** for format/lint (keryx-style), not Prettier.
