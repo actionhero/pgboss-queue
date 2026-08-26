@@ -159,6 +159,7 @@ When you change a public method, update:
 1. JSDoc
 2. The matching guide page under `docs/guide/` (once Phase 9 exists)
 3. Tests
+4. The relevant `docs/plans/0X-*.md` file **and** its `## Lessons learned` section
 
 ## Publishing
 
