@@ -118,3 +118,4 @@ A compiling package, a shared `specHelper`, and CI that will run every subsequen
 - 2026-08-26: Reverted the suite to `bun:test`. Node coverage is `scripts/assert-node-package.mjs` (import compiled `exports` on Node 26, not a second copy of the Postgres tests).
 - 2026-08-26: The `node-package` CI step must invoke `node` directly. `bun run test:node-package` can still shell out to `node`, but the workflow should not go through Bun for that check.
 - 2026-08-26: `noImplicitAny` is set on both `tsconfig.json` and `tsconfig.test.json` so relaxing `strict` later still bans implicit `any` in src and tests.
+- 2026-08-26: Required checks on `main` should be `complete` and `Cursor Bugbot`. The cloud agent GitHub token is not a repo admin (403 on branch protection and rulesets), so a maintainer must set that in the GitHub UI.
