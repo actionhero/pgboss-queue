@@ -31,7 +31,7 @@ Port `__tests__/core/multiWorker.ts` **in this PR**:
 - stays at min on blocking CPU jobs
 - failure events bubble
 
-These tests are CPU-noisy; keep `jest.retryTimes` equivalent (`test.todo` is not acceptable). bun:test has retry — use it.
+These tests are CPU-noisy; keep a `jest.retryTimes` equivalent (`test.todo` is not acceptable). Prefer rerunning the file in CI over weakening assertions.
 
 **CI:** green on `test.yaml` before merge.
 
@@ -52,4 +52,5 @@ pg-boss `localConcurrency` is **not** a substitute. MultiWorker must spawn real 
 
 ## Lessons learned
 
-_None yet._
+- 2026-08-26: Phase 1 runs tests with `node:test`, not `bun:test`. Do not assume Bun-only retry APIs when this phase is implemented.
+
