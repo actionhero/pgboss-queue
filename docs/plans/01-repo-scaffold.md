@@ -1,6 +1,6 @@
 # Phase 1 — Repo scaffold, test harness, and CI
 
-**Status:** in-progress  
+**Status:** done  
 **Depends on:** Phase 0
 
 ## Goal
