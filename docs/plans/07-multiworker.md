@@ -24,7 +24,7 @@ Options defaults: min 1, max 10, timeout 5000, checkTimeout 500, maxEventLoopDel
 
 ## Tests
 
-Port `__tests__/core/multiWorker.ts`:
+Port `__tests__/core/multiWorker.ts` **in this PR**:
 
 - never zero workers while running (at least min)
 - scales to max on slow *sleep* (I/O) jobs
@@ -32,6 +32,8 @@ Port `__tests__/core/multiWorker.ts`:
 - failure events bubble
 
 These tests are CPU-noisy; keep `jest.retryTimes` equivalent (`test.todo` is not acceptable). bun:test has retry — use it.
+
+**CI:** green on `test.yaml` before merge.
 
 ## Example
 
@@ -42,6 +44,7 @@ Port `examples/multiWorker.ts` to Postgres connection details.
 - Public class exported
 - Tests green (allow retries)
 - README snippet matches node-resque's MultiWorker section with connection strings swapped
+- **CI green** on this PR
 
 ## Note
 

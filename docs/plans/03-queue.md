@@ -107,14 +107,16 @@ Port `pluginRunner.ts` now so `enqueue` hooks work. `beforePerform` is unused un
 
 ## Tests
 
-Port `__tests__/core/queue.ts` in full (see plan 08 for the name list). Helper `specHelper.popFromQueue()` should `fetch` one job from the default queue and return the encoded JSON string **or** parsed job — adapt the helper, keep assertions on `class` / `args`.
+Port `__tests__/core/queue.ts` **in this PR** (see plan 08 for the name list). Helper `specHelper.popFromQueue()` should `fetch` one job from the default queue and return the encoded JSON string **or** parsed job — adapt the helper, keep assertions on `class` / `args`.
 
 Skip only tests that poke Redis keys directly if any remain inside queue.ts (there should be none except stats/locks which we emulate).
+
+**CI:** this phase is not done until `test.yaml` is green with the new queue tests. Do not leave queue coverage for Phase 8.
 
 ## Acceptance criteria
 
 - All Queue methods exist with JSDoc copied/adapted from node-resque
-- `__tests__/core/queue.ts` port is green (worker-status tests that start a Worker wait for Phase 4 — split those into a `describe` marked pending **or** implement after Phase 4; prefer implementing worker methods against empty tables so idle tests pass, and mark `active workingOn` pending)
+- `__tests__/core/queue.ts` port is green on CI (worker-status tests that start a Worker wait for Phase 4 — split those into a `describe` marked pending **or** implement after Phase 4; prefer implementing worker methods against empty tables so idle tests pass, and mark `active workingOn` pending)
 
 Recommended split:
 

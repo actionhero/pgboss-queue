@@ -104,7 +104,7 @@ Port. `"*"` untrack → list queues → set `this.queues` → track.
 
 ## Tests
 
-Port `__tests__/core/worker.ts` entirely:
+Port `__tests__/core/worker.ts` **in this PR** (see Phase 8 matrix). CI (`test.yaml`) must be green.
 
 - connect, boot/stop
 - performInline success/fail/plugin
@@ -119,12 +119,15 @@ Add (not in node-resque, but required for "multi-worker"):
 - two Worker instances, 20 jobs, both succeed, no double-processing
 - priority: enqueue `low` then `high`; worker `queues: ["high","low"]` processes high first (even if low was enqueued earlier)
 
+Also finish queue.ts worker-status tests deferred from Phase 3.
+
 ## Acceptance criteria
 
 - Worker event names and payloads match node-resque (duration included)
 - Heartbeats visible via `queue.allWorkingOn()` / `queue.workers()`
 - Multi-process safety demonstrated
 - `performInline` does not touch Postgres
+- **CI green** on this PR
 
 ## Next phase needs
 

@@ -119,7 +119,7 @@ Custom domain optional (`CNAME`); default `https://actionhero.github.io/pgboss-q
 
 ## Tests
 
-keryx runs `bun test` inside `docs/` after build. Minimum: `docs:build` job in CI (Phase 10) must succeed. Add `docs/__tests__/build.test.ts` that asserts `docs/.vitepress/dist/index.html` exists after build if we want parity.
+keryx runs `bun test` inside `docs/` after build. **This phase** appends a `docs` job to the existing Phase 1 `test.yaml` (`bun run docs:build`). Do not wait for Phase 10. Add `docs/__tests__/build.test.ts` that asserts `docs/.vitepress/dist/index.html` exists after build if we want parity. Update `complete.needs` to include `docs`.
 
 ## Editorial
 
@@ -128,13 +128,13 @@ Short sentences. No "simply". Code samples TypeScript. Mirror node-resque event 
 ## Acceptance criteria
 
 - `bun run docs:dev` works
-- `bun run docs:build` works in CI
+- `bun run docs:build` works in **PR CI** (job added to `test.yaml` in this phase)
 - Guide covers connection, worker, scheduler (migrate + sweeper), plugins, multiworker, migration from node-resque
 - Plans are not the homepage
 
 ## Next
 
-Phase 10 wires docs deploy next to npm publish.
+Phase 10 adds Pages deploy (if not already in `docs.yaml`) and npm publish. Test CI stays the Phase 1 workflow.
 
 ## Lessons learned
 

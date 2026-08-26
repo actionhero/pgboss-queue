@@ -129,7 +129,7 @@ Port control flow from `src/core/scheduler.ts` (processing flag, recursive end i
 
 ## Tests
 
-Port `__tests__/core/scheduler.ts`:
+Port `__tests__/core/scheduler.ts` **in this PR**. CI must be green.
 
 - connect, start/stop
 - error emit on poll failure
@@ -144,6 +144,8 @@ Add:
 - automigrate false: leader does not create tables (specHelper must not pre-migrate this file)
 - sweeper cases above
 
+Do not defer scheduler coverage to Phase 8.
+
 ## Acceptance criteria
 
 - Multi-scheduler, single leader
@@ -151,6 +153,7 @@ Add:
 - Delayed jobs become worker-visible at the right time
 - Stuck workers fail like node-resque
 - Failed jobs survive the sweeper
+- **CI green** on this PR
 
 ## Next phase needs
 

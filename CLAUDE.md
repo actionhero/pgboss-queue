@@ -13,22 +13,22 @@ This is an Actionhero project (sibling of [node-resque](https://github.com/actio
 | If you are… | Start here |
 | --- | --- |
 | Orienting | [`docs/plans/00-overview.md`](./docs/plans/00-overview.md) |
-| Scaffolding the package | [`docs/plans/01-repo-scaffold.md`](./docs/plans/01-repo-scaffold.md) |
+| Scaffolding + **CI / specHelper** | [`docs/plans/01-repo-scaffold.md`](./docs/plans/01-repo-scaffold.md) |
 | Touching connections / SQL | [`docs/plans/02-connection-and-schema.md`](./docs/plans/02-connection-and-schema.md) |
 | Enqueue / inspect / fail | [`docs/plans/03-queue.md`](./docs/plans/03-queue.md) |
 | Running jobs | [`docs/plans/04-worker.md`](./docs/plans/04-worker.md) |
 | Leader, migrate, sweep | [`docs/plans/05-scheduler.md`](./docs/plans/05-scheduler.md) |
 | Locks / retry | [`docs/plans/06-plugins.md`](./docs/plans/06-plugins.md) |
 | In-process pool | [`docs/plans/07-multiworker.md`](./docs/plans/07-multiworker.md) |
-| Porting tests | [`docs/plans/08-conformance-tests.md`](./docs/plans/08-conformance-tests.md) |
+| Conformance **audit** | [`docs/plans/08-conformance-tests.md`](./docs/plans/08-conformance-tests.md) |
 | Docs site | [`docs/plans/09-docs-site.md`](./docs/plans/09-docs-site.md) |
-| CI / npm | [`docs/plans/10-publish-and-ci.md`](./docs/plans/10-publish-and-ci.md) |
+| npm / Pages publish | [`docs/plans/10-publish-and-ci.md`](./docs/plans/10-publish-and-ci.md) |
 
 ## Current state
 
 User-facing docs live in `README.md` (and later the VitePress site). Do not put implementation-plan links, phase tables, or "status: planning" notes in the README.
 
-The implementation spec is `docs/plans/*` plus this file. Library source, tests, VitePress, and CI land in later phases. When a phase is complete, update that plan's **Status** line to `done` and move on.
+The implementation spec is `docs/plans/*` plus this file. **CI and the Postgres test harness land in Phase 1** so every later PR is gated. Library source, VitePress, and npm publish land in later phases. When a phase is complete, update that plan's **Status** line to `done` and move on.
 
 ## Keep the phase plans current (required)
 
@@ -45,7 +45,7 @@ A PR with no `docs/plans/` diff is only OK when the change is truly unrelated (t
 
 ## Tooling (once Phase 1 exists)
 
-This is a **Bun + TypeScript** project. Use `bun`, never `npm` or `npx`, for install/test/run. Use `bunx` if you need a package runner.
+This is a **Bun + TypeScript** project. Use `bun`, never `npm` or `npx`, for install/test/run. Use `bunx` if you need a package runner. PRs must stay green on `.github/workflows/test.yaml` (lint, build, `bun test` against Postgres).
 
 ```bash
 bun install                 # install
@@ -141,6 +141,12 @@ Do **not** accept `pkg: "ioredis"`, `redis: Redis`, or `database: number`. Those
 
 ## Testing rules
 
+**Test as you go. CI from Phase 1.** Do not defer tests to Phase 8.
+
+- Phase 1 ships `specHelper`, a Postgres smoke test (`SELECT 1`), and `test.yaml`. A phase PR is not done until that workflow is green.
+- Port the matching rows from [`docs/plans/08-conformance-tests.md`](./docs/plans/08-conformance-tests.md) **in the same PR as the code** (connection tests in Phase 2, queue in 3, worker in 4, etc.).
+- Phase 8 is an **audit** of leftover titles, skip reasons, and `check-conformance` — not the first time tests run.
+
 Target: **100% conformance to the relevant node-resque test suite.** "Relevant" is defined in Phase 8. Redis-only tests (ioredis mock, Lua `popAndStoreJob`, keyPrefix, `KEYS`/`SCAN`) are skipped and listed. Everything else must pass with the same assertions.
 
 When porting a test:
@@ -170,6 +176,7 @@ Follow keryx: bump `version` in `package.json` on every user-facing PR (patch fo
 - One phase per PR when possible. Do not combine "invent MultiWorker" with "stand up VitePress".
 - Link the plan file in the PR body (`Implements docs/plans/0X-….md`).
 - Update the phase document(s) and **`## Lessons learned`** in the same PR (see **Keep the phase plans current** above). Do not leave plans stale.
+- **CI must be green** (`test.yaml` `complete` job) before merging a phase. Tests for that phase's API ship in the same PR.
 
 ## Upstream references (read, don't vendor)
 

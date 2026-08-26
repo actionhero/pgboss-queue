@@ -60,7 +60,7 @@ If a plugin was written against `this.queueObject.connection.redis`, that is **u
 
 ## Tests
 
-Port all of `__tests__/plugins/`:
+Port all of `__tests__/plugins/` **in this PR**:
 
 - `custom_plugins.ts`
 - `delayedQueueLock.ts`
@@ -73,12 +73,15 @@ Same names, same timings as much as CI allows (retry/jobLock are timing-sensitiv
 
 Also port `__tests__/core/queue.ts` `describe("locks")` if not already green.
 
+**CI:** `test.yaml` green with these files. Do not wait for Phase 8.
+
 ## Acceptance criteria
 
 - All five plugins exported as `Plugins.JobLock` etc. (port `src/plugins/index.ts`)
 - Plugin tests green
 - `queue.locks()` / `delLock()` work
 - Retry does not double-retry with pg-boss
+- **CI green** on this PR
 
 ## Next
 

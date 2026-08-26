@@ -1,41 +1,57 @@
-# Phase 8 — Conformance tests (100% of relevant node-resque suite)
+# Phase 8 — Conformance audit (remaining node-resque tests)
 
 **Status:** not-started  
-**Depends on:** Phases 3–7 (tests should land *with* those phases; this phase is the gate)
+**Depends on:** Phases 1–7 (harness and CI already exist; most tests already landed with their phase)
 
 ## Goal
 
-Every **relevant** node-resque test exists in this repo under the same `describe`/`test` name and passes against Postgres. Redis-only tests are listed as skipped with a reason. No silent assertion weakening.
+**This is not when we start testing.** CI and `specHelper` ship in Phase 1. Connection / Queue / Worker / Scheduler / plugin / MultiWorker tests ship in Phases 2–7 and must already be green on `test.yaml`.
 
-Source of truth: [actionhero/node-resque](https://github.com/actionhero/node-resque) `__tests__/` on `main` (currently 9.7.x). When porting, pin a commit SHA in this file.
+This phase is the **audit**: every **relevant** node-resque test exists under the same `describe`/`test` name, skip reasons are complete, extra Postgres tests exist, and a title-diff against upstream is clean. Redis-only tests stay skipped with a reason. No silent assertion weakening.
 
-## Tooling
+Source of truth: [actionhero/node-resque](https://github.com/actionhero/node-resque) `__tests__/` on `main` (currently 9.7.x). When auditing, pin a commit SHA in this file.
+
+## What already exists (do not redo)
+
+| Landed in | Tests |
+| --- | --- |
+| Phase 1 | `specHelper` skeleton, smoke `SELECT 1`, `test.yaml` (lint / build / Postgres / complete) |
+| Phase 2 | connection + connectionError (+ illegal schema, BYO pool, migrate) |
+| Phase 3 | `__tests__/core/queue.ts` (minus live-worker slices deferred to 4) |
+| Phase 4 | `__tests__/core/worker.ts`, remaining queue worker-status, multi-process + priority extras |
+| Phase 5 | `__tests__/core/scheduler.ts`, automigrate + sweeper extras |
+| Phase 6 | `__tests__/plugins/*` |
+| Phase 7 | `__tests__/core/multiWorker.ts` |
+
+If a row above is missing when you start this phase, that is a **bug in an earlier phase** — go back and fix that plan/PR. Do not dump the entire suite into one late PR.
+
+## Tooling (already specified in Phase 1; complete here if gaps remain)
 
 | node-resque | pgboss-queue |
 | --- | --- |
-| Jest + ts-jest | `bun:test` |
-| `ioredis` specHelper | Postgres specHelper |
-| `REDIS_HOST` | `DATABASE_URL` |
-| `afterAll` disconnect redis | `afterAll` end pool + `DROP SCHEMA … CASCADE` or truncate `pgrq_*` + `job` |
+| Jest + ts-jest | `bun:test` (`bun test --concurrency=1`) |
+| `ioredis` specHelper | `__tests__/utils/specHelper.ts` |
+| `REDIS_HOST` | `DATABASE_URL` (CI injects it) |
+| `afterAll` disconnect redis | `afterAll` end pool + truncate or `DROP SCHEMA` |
 
-`__tests__/utils/specHelper.ts` should expose:
+`specHelper` exports (Phase 2+ must have these; Phase 1 had stubs):
 
 ```ts
 connectionDetails: ConnectionOptions
 timeout: number
-queue: string  // default queue name
-namespace: string // schema name, unique per test file if parallel
+queue: string
+schema: string
 connect / disconnect / cleanup
-popFromQueue(): Promise<string | null>  // fetch + serialize like Redis LPOP did
+popFromQueue(): Promise<string | null>
 ```
 
-**Isolation:** each test file uses a schema like `pgrq_test_{hash}` **or** a single schema with `cleanup()` truncating tables. Prefer truncate + migrate once in `beforeAll` for speed; unique schema if bun parallelizes files.
-
-node-resque runs tests serially enough that one Redis DB works. Start **serial** (`bun test` default files can be concurrent — set a mutex or `--concurrency=1` for v1). Document in `package.json` `"test": "bun test --concurrency=1"`.
+**Isolation:** truncate + migrate once in `beforeAll` for speed, or per-file schema. Keep `--concurrency=1` until proven otherwise.
 
 ## Matrix
 
-Legend: **Port** = must exist and pass. **Skip** = file/test not relevant; add `test.skip` with comment `// redis-only: …` **or** omit the file and list it here. Omitting requires a row in this table so coverage is auditable.
+Legend: **Port** = must exist and pass (ideally already, from Phases 2–7). **Skip** = Redis-only; `test.skip` with `// redis-only: …` **or** omit the file and keep the row here.
+
+Use this table as a **checklist in this phase's PR**: tick what is already green, add anything missing.
 
 ### `__tests__/core/connection.ts`
 
@@ -111,11 +127,11 @@ Adapt any `specHelper.redis.rpop(namespace+":failed")` to `queue.failed(0,-1)`.
 
 ### `__tests__/utils/*`
 
-Port `specHelper` and `custom-plugin.ts` as needed; not user-facing.
+`specHelper` and `custom-plugin.ts` as needed; not user-facing.
 
 ## Extra tests (required, not in node-resque)
 
-These do not count as "instead of" ports; they are additive:
+These should already exist from Phases 2–5; verify here:
 
 1. **Multi-process dequeue** — 4 workers, 100 jobs, 100 unique successes
 2. **Priority queues** — `queues: ["high","low"]` works high first
@@ -126,7 +142,7 @@ These do not count as "instead of" ports; they are additive:
 
 ## Semantic-diff log
 
-If an assertion cannot be identical, add a row:
+If an assertion cannot be identical, add a row (may already have rows from earlier phases):
 
 | Test name | node-resque assertion | Ours | Why |
 | --- | --- | --- | --- |
@@ -136,19 +152,20 @@ PRs that add rows must explain. "Postgres is different" is not enough if the Que
 
 ## Running against upstream
 
-Optional script `scripts/check-conformance.ts` (Bun): clone node-resque test titles via regex, clone ours, fail CI if a **Port** title is missing. Nice-to-have in this phase; required before 1.0.
+`scripts/check-conformance.ts` (Bun): collect node-resque test titles vs ours, fail CI if a **Port** title is missing. Required before 1.0; add the script to `test.yaml` in this phase (still no publish workflow).
 
 ## Acceptance criteria
 
-- `bun test` green with `--concurrency=1`
-- This matrix checked off in the PR that closes Phase 8
+- `bun test` green on CI (`complete` job)
+- This matrix checked off; every Port row is an existing passing test
 - Skip list is complete (no forgotten files)
+- `check-conformance` runs in CI
 - CI Postgres service is the only backend
 
 ## Next
 
-Docs site can describe a real API. Publish workflow can trust tests.
+Docs site can describe a real API. Phase 10 can trust tests that have been running since Phase 1.
 
 ## Lessons learned
 
-_None yet._
+- 2026-08-26 (plan): This phase is an audit, not the first test suite. Tests ship with Phases 1–7; CI has been running since Phase 1.

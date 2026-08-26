@@ -185,7 +185,9 @@ We do not want two maintenance systems. pg-boss's built-in delete/archive would 
 
 ## Tests (this phase)
 
-Port-inspired, not full queue tests yet:
+Port in **this PR** (Phase 8 matrix: `connection.ts` + `connectionError.ts`). CI from Phase 1 must stay green.
+
+Port-inspired plus the Adapt rows from Phase 8:
 
 - connect with `connectionString`
 - connect with discrete `host/port/user/password/database`
@@ -195,13 +197,18 @@ Port-inspired, not full queue tests yet:
 - second `migrate()` is a no-op
 - `tryLeader` : only one of two connections wins; after expiry the other wins
 - `setLockNx` / expire / `delLock`
+- connectionError (bad host)
+- fill `specHelper.cleanup()` to truncate `pgrq_*` (and `job` once pg-boss exists)
+
+Do not defer these to Phase 8.
 
 ## Acceptance criteria
 
 - Connection API compiles and is documented
 - Schema install is idempotent
 - No job enqueue yet (that is Phase 3)
-- CI uses `DATABASE_URL`
+- **`test.yaml` is green on the PR** (Postgres job runs the new files)
+- `specHelper.cleanup()` leaves no leftover rows
 
 ## Next phase needs
 

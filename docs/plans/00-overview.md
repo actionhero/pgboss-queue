@@ -154,7 +154,7 @@ pgboss-queue/
   __tests__/       port of node-resque tests (core, plugins, utils)
   examples/
   docs/            VitePress (Phase 9) + plans/ (this folder)
-  .github/workflows/
+  .github/workflows/   test.yaml from Phase 1 (lint, build, Postgres)
 ```
 
 ## Non-goals (v1)
@@ -167,7 +167,7 @@ pgboss-queue/
 
 ## Success metric
 
-Phase 8's matrix is green: every **relevant** node-resque test exists under the same name and passes against Postgres. Docs site builds. `npm publish` workflow is in place. A Keryx follow-up can replace `PgBossBackend` with this package without changing `api.actions.enqueue*`.
+Phase 8's matrix is green: every **relevant** node-resque test exists under the same name and passes against Postgres. Those tests have been running in CI since the phase that introduced the API. Docs site builds. `npm publish` workflow is in place. A Keryx follow-up can replace `PgBossBackend` with this package without changing `api.actions.enqueue*`.
 
 ## Lessons learned
 
