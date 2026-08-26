@@ -29,7 +29,7 @@ If a row above is missing when you start this phase, that is a **bug in an earli
 
 | node-resque | pgboss-queue |
 | --- | --- |
-| Jest + ts-jest | `bun:test` (`bun test --concurrency=1`) |
+| Jest + ts-jest | `bun:test` (`bun test --max-concurrency=1`) |
 | `ioredis` specHelper | `__tests__/utils/specHelper.ts` |
 | `REDIS_HOST` | `DATABASE_URL` (CI injects it) |
 | `afterAll` disconnect redis | `afterAll` end pool + truncate or `DROP SCHEMA` |
@@ -45,7 +45,7 @@ connect / disconnect / cleanup
 popFromQueue(): Promise<string | null>
 ```
 
-**Isolation:** truncate + migrate once in `beforeAll` for speed, or per-file schema. Keep `--concurrency=1` until proven otherwise.
+**Isolation:** truncate + migrate once in `beforeAll` for speed, or per-file schema. Keep Bun `--max-concurrency=1` until proven otherwise. Do not pass `bun test --concurrency=1` — that is not a Bun flag. Node compatibility is the Phase 1 `node-package` job, not a second test runner.
 
 ## Matrix
 
@@ -169,3 +169,5 @@ Docs site can describe a real API. Phase 10 can trust tests that have been runni
 ## Lessons learned
 
 - 2026-08-26 (plan): This phase is an audit, not the first test suite. Tests ship with Phases 1–7; CI has been running since Phase 1.
+- 2026-08-26: Phase 1 corrected the runner to `node:test` on a Bun + Node matrix. Isolation uses `--max-concurrency=1` / `--test-concurrency=1`, not `bun test --concurrency=1`.
+- 2026-08-26: Phase 1 reverted the suite to `bun:test`. Node is covered by importing `dist/` (`test:node-package`), not by running this matrix on `node --test`.

@@ -302,7 +302,7 @@ Raise your Postgres pool `max` when using a large `maxTaskProcessors`. Events ma
 
 ## Requirements
 
-- Node.js 20+ or [Bun](https://bun.sh)
+- Node.js 26+ or [Bun](https://bun.sh)
 - PostgreSQL 13+ (`SKIP LOCKED`)
 
 ```bash

@@ -1,6 +1,6 @@
 # Phase 1 — Repo scaffold, test harness, and CI
 
-**Status:** not-started  
+**Status:** done  
 **Depends on:** Phase 0
 
 ## Goal
@@ -23,16 +23,16 @@ CI must exist **before** Queue/Worker code. An empty `expect(true)` that never o
   - `type`: `"module"`
   - `main` / `types`: `dist/index.js` / `dist/index.d.ts`
   - `exports` with `import` + types
-  - `engines.node`: `>=20`
+  - `engines.node`: `>=26`
   - `license`: `Apache-2.0`
-  - `scripts`: `"test": "bun test --concurrency=1"`, `build`, `lint`, `format` (docs scripts wait for Phase 9)
+  - `scripts`: `"test": "bun test --max-concurrency=1"`, `"test:node-package": "node scripts/assert-node-package.mjs"`, `build`, `lint`, `format` (docs scripts wait for Phase 9)
   - `devDependencies`: `typescript`, `@types/node`, `@types/pg`, `@biomejs/biome`, `@types/bun`
   - `dependencies`: `pg` now (smoke test uses it). Add `pg-boss` in Phase 2 if you want to keep this PR smaller — either is fine as long as CI is green.
-- `tsconfig.json` — `strict`, `ES2022`, `moduleResolution: bundler` or `nodenext`, `declaration`, `outDir: dist`, `rootDir: src`
-- `biome.json` — match keryx reasonably (indent 2, no unused imports)
+- `tsconfig.json` — `strict`, `noImplicitAny: true`, `ES2022`, `moduleResolution: bundler` or `nodenext`, `declaration`, `outDir: dist`, `rootDir: src`. `tsconfig.test.json` typechecks `__tests__` with `noEmit` (so implicit `any` in tests fails `build` too).
+- `biome.json` — match keryx reasonably (indent 2, no unused imports). `suspicious/noExplicitAny` is `error` so `: any` and `as any` fail `lint`.
 - `.gitignore` — `node_modules`, `dist`, `.env`, `docs/.vitepress/dist`, `*.log`
 - `LICENSE` — Apache-2.0
-- `.nvmrc` or `.node-version` — `20`
+- `.nvmrc` or `.node-version` — `26`
 - `.env.example` — `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgboss_queue_test`
 
 ### Source stub
@@ -46,22 +46,12 @@ Keep the file compiling. Do not fake Queue/Worker yet.
 
 ### Local Postgres
 
-`docker-compose.yml`:
+No `docker-compose.yml`. CI starts Postgres as a GitHub Actions service. Locally, point `DATABASE_URL` at any Postgres 13+ you already run (homebrew, apt, a shared dev database, etc.). Tests must never target production.
 
-```yaml
-services:
-  postgres:
-    image: postgres:16
-    environment:
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: pgboss_queue_test
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+`.env.example` is the only local-DB contract:
+
+```
+DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgboss_queue_test
 ```
 
 ### Test harness (not a dummy assert)
@@ -80,77 +70,23 @@ services:
 - `SELECT 1` returns `1` through specHelper's pool
 - `bun run build` artifacts exist *or* that check lives in CI only (prefer CI `bun run build`)
 
-Do **not** ship only `expect(true).toBe(true)`.
+Do **not** ship only `expect(true).toBe(true)`. Tests use `bun:test`. Node compatibility is `scripts/assert-node-package.mjs`: after `bun run build`, Node 26 imports `package.json` `exports["."].import` (`dist/index.js`) and asserts `process.versions.bun` is unset. Later phases should import real public APIs in that script (do not re-run the Bun suite on Node).
 
 ### CI — full test workflow now
 
-`.github/workflows/test.yaml` is the product gate from this PR onward. Copy this shape (keryx `test.yaml` + node-resque's Postgres-instead-of-Redis):
+`.github/workflows/test.yaml` is the product gate from this PR onward. Jobs: `lint`, `build`, `test` (Postgres 16 service, **Bun `bun:test`**), `node-package` (Node 26 imports the compiled package), `complete`.
 
-```yaml
-name: Test
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+- `test`: `bun run test` with `DATABASE_URL=postgres://postgres:postgres@localhost:5432/pgboss_queue_test`
+- `node-package`: `actions/setup-node` from `.nvmrc` (26), `bun run build`, then **`node scripts/assert-node-package.mjs`** (not `bun run`; no Postgres)
 
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bun run lint
-
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bun run build
-
-  test:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: pgboss_queue_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bun test
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/pgboss_queue_test
-
-  complete:
-    if: always()
-    needs: [lint, build, test]
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
-            exit 1
-          fi
-```
+See the workflow file for the YAML. Do not duplicate a second test pipeline in Phase 10.
 
 Rules:
 
 - Do **not** wait for Phase 10 to add this file. Phase 10 is npm publish + GitHub Pages only.
 - Do **not** add a `docs` job yet (VitePress does not exist). Phase 9 appends it.
 - `complete` must fail the workflow if lint, build, or test failed.
-- Branch protection (when maintainers can set it): require `complete`.
+- Branch protection (maintainer UI; this agent cannot set it): require `complete` and `Cursor Bugbot`.
 
 ### README / CLAUDE.md
 
@@ -161,8 +97,9 @@ Rules:
 - `bun install` works locally
 - `bun run build` emits `dist/`
 - `bun run lint` is clean
-- `docker compose up -d postgres` + `bun test` is green locally
-- **GitHub Actions on this PR is green** (lint, build, Postgres test job, `complete`)
+- `DATABASE_URL` pointing at a local Postgres + `bun test` is green
+- `bun run build` + `node scripts/assert-node-package.mjs` is green on Node 26
+- **GitHub Actions on this PR is green** (lint, build, Bun Postgres tests, Node package import, `complete`)
 - Smoke test fails if Postgres is down or `DATABASE_URL` is missing
 - No runtime exports claimed that do not exist
 
@@ -173,3 +110,12 @@ A compiling package, a shared `specHelper`, and CI that will run every subsequen
 ## Lessons learned
 
 - 2026-08-26 (plan): Test CI and a real Postgres smoke test (`SELECT 1`) belong here, not in Phase 10. Later phases must stay green on this workflow.
+- 2026-08-26: Pin Node to Current 26 (`engines.node` `>=26`, `.nvmrc` `26`) instead of the original `>=20` pin. `@types/node` already tracks 26.
+- 2026-08-26: `bun test --concurrency=1` is not a Bun flag (`bun test --help` has `--concurrent` and `--max-concurrency`, not `--concurrency`). Bun still accepted the unknown flag and ran anyway. Use `--max-concurrency=1` on Bun and `--test-concurrency=1` on `node --test`. Tests are sequential by default unless `--concurrent` / `--parallel` is set.
+- 2026-08-26: Dropped `docker-compose.yml`. CI Postgres is a GitHub Actions service; locally `DATABASE_URL` is enough. Compose would only wrap a database this repo does not otherwise orchestrate.
+- 2026-08-26: Test matrix runs the same `node:test` files on Bun and Node 26. `bun:test` cannot run on Node, so the suite is `node:test` + `node:assert/strict` rather than `bun:test`.
+- 2026-08-26: Ban `any` in the whole tree: `noImplicitAny` in `tsconfig.json` (explicit even though `strict` already implies it), `tsc --noEmit -p tsconfig.test.json` so tests are included, and Biome `noExplicitAny` as an error. `tsc` has no `noExplicitAny` flag.
+- 2026-08-26: Reverted the suite to `bun:test`. Node coverage is `scripts/assert-node-package.mjs` (import compiled `exports` on Node 26, not a second copy of the Postgres tests).
+- 2026-08-26: The `node-package` CI step must invoke `node` directly. `bun run test:node-package` can still shell out to `node`, but the workflow should not go through Bun for that check.
+- 2026-08-26: `noImplicitAny` is set on both `tsconfig.json` and `tsconfig.test.json` so relaxing `strict` later still bans implicit `any` in src and tests.
+- 2026-08-26: Required checks on `main` should be `complete` and `Cursor Bugbot`. The cloud agent GitHub token is not a repo admin (403 on branch protection and rulesets), so a maintainer must set that in the GitHub UI.

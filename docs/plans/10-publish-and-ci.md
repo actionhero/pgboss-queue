@@ -94,7 +94,7 @@ jobs:
 
 `package.json` must include `"files": ["dist", "README.md", "LICENSE"]` so we do not publish tests or plans.
 
-Optional later: Node 20/22/24 matrix for compiled `dist/` consumers. Add to `test.yaml` (Phase 1 file), not here.
+The Phase 1 `test` job runs `bun:test` against Postgres. The `node-package` job imports compiled `dist/` on Node 26. Do not add a second suite matrix here.
 
 ## Versioning policy (CLAUDE.md)
 
@@ -107,8 +107,7 @@ Do not publish `0.0.1` empty stubs. First intentional bump to `0.1.0` is the fir
 Port node-resque `examples/` in Phases 4–7. This phase can add a compose-based example command if missing:
 
 ```bash
-docker compose up -d postgres
-bun examples/example.ts
+DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgboss_queue_test bun examples/example.ts
 ```
 
 Optional: `examples/docker` like node-resque — not required for v1.
@@ -134,3 +133,5 @@ README (user-facing): GitHub Test workflow badge (the Phase 1 workflow), npm ver
 ## Lessons learned
 
 - 2026-08-26 (plan): Test CI is Phase 1. This phase is only Pages + npm publish.
+- 2026-08-26: Phase 1 already matrices Bun and Node 26 in `test.yaml`. Example runs use `DATABASE_URL`; there is no repo `docker-compose.yml`.
+- 2026-08-26: Phase 1 dropped the suite matrix. `test` is Bun; `node-package` only imports `dist/` on Node 26.

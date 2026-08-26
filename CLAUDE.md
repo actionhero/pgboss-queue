@@ -45,21 +45,21 @@ A PR with no `docs/plans/` diff is only OK when the change is truly unrelated (t
 
 ## Tooling (once Phase 1 exists)
 
-This is a **Bun + TypeScript** project. Use `bun`, never `npm` or `npx`, for install/test/run. Use `bunx` if you need a package runner. PRs must stay green on `.github/workflows/test.yaml` (lint, build, `bun test` against Postgres).
+This is a **Bun + TypeScript** project. Use `bun`, never `npm` or `npx`, for install/lint/build/test. Use `bunx` if you need a package runner. PRs must stay green on `.github/workflows/test.yaml` (lint, build, `bun test` against Postgres, Node package import).
 
 ```bash
 bun install                 # install
 bun test                    # bun:test, needs Postgres
+node scripts/assert-node-package.mjs  # after build; must use Node, not bun
 bun run lint                # biome check
 bun run format              # biome write
-bun run build               # tsc / bun build of src → dist
+bun run build               # tsc of src → dist, plus test typecheck
 bun docs:dev                # VitePress (Phase 9)
 ```
 
-Local Postgres (Phase 1 `docker-compose.yml`):
+Local Postgres: set `DATABASE_URL` (see `.env.example`). CI starts Postgres as a workflow service; there is no `docker-compose.yml`.
 
 ```bash
-docker compose up -d postgres
 # DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgboss_queue_test
 ```
 
@@ -131,11 +131,11 @@ Do **not** accept `pkg: "ioredis"`, `redis: Redis`, or `database: number`. Those
 
 ## Coding conventions
 
-- **TypeScript strict.** No `as any`. Use `@ts-expect-error` with a comment when the type system cannot express something.
+- **TypeScript strict (`noImplicitAny`).** No `any` and no `as any`. Biome `noExplicitAny` is an error. Use `@ts-expect-error` with a comment when the type system cannot express something.
 - **JSDoc on every public class, method, and exported type.** `@param` for each parameter (including edge cases), `@returns` when non-obvious, `@throws` when applicable. Match node-resque's documented Queue methods.
 - **No Python.** New scripts, CLIs, and tooling are Bun + TypeScript.
 - **Biome** for format/lint (keryx-style), not Prettier.
-- **Tests use `bun:test`**, not Jest. Port node-resque tests faithfully: same `describe` / `test` names, same assertions, Postgres `specHelper` instead of Redis.
+- **Tests use `bun:test`**, not Jest. Port node-resque tests faithfully: same `describe` / `test` names, same assertions, Postgres `specHelper` instead of Redis. Node must still be able to import the compiled package (`node scripts/assert-node-package.mjs`); do not run the Bun suite on Node.
 - **Every behavior change ships with tests.** A PR with no test changes is a red flag unless it is docs-only.
 - **Do not add dependencies** unless a phase plan names them. Expected runtime deps: `pg-boss`, `pg`. Dev: `typescript`, `@types/pg`, `biome`, `bun` types.
 
