@@ -117,3 +117,4 @@ A compiling package, a shared `specHelper`, and CI that will run every subsequen
 - 2026-08-26: Ban `any` in the whole tree: `noImplicitAny` in `tsconfig.json` (explicit even though `strict` already implies it), `tsc --noEmit -p tsconfig.test.json` so tests are included, and Biome `noExplicitAny` as an error. `tsc` has no `noExplicitAny` flag.
 - 2026-08-26: Reverted the suite to `bun:test`. Node coverage is `scripts/assert-node-package.mjs` (import compiled `exports` on Node 26, not a second copy of the Postgres tests).
 - 2026-08-26: The `node-package` CI step must invoke `node` directly. `bun run test:node-package` can still shell out to `node`, but the workflow should not go through Bun for that check.
+- 2026-08-26: `noImplicitAny` is set on both `tsconfig.json` and `tsconfig.test.json` so relaxing `strict` later still bans implicit `any` in src and tests.
