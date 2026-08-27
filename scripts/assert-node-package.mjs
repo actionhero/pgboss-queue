@@ -22,7 +22,8 @@ const mod = await import(url);
 
 assert.equal(typeof mod, "object");
 assert.ok(mod);
+assert.equal(typeof mod.Connection, "function");
 
 process.stdout.write(
-  `imported ${pkg.name} from ${entry} on node ${process.versions.node}\n`,
+  `imported ${pkg.name} Connection from ${entry} on node ${process.versions.node}\n`,
 );

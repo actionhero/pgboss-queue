@@ -16,12 +16,12 @@ Source of truth: [actionhero/node-resque](https://github.com/actionhero/node-res
 | Landed in | Tests |
 | --- | --- |
 | Phase 1 | `specHelper` skeleton, smoke `SELECT 1`, `test.yaml` (lint / build / Postgres / complete) |
-| Phase 2 | connection + connectionError (+ illegal schema, BYO pool, migrate) |
-| Phase 3 | `__tests__/core/queue.ts` (minus live-worker slices deferred to 4) |
-| Phase 4 | `__tests__/core/worker.ts`, remaining queue worker-status, multi-process + priority extras |
-| Phase 5 | `__tests__/core/scheduler.ts`, automigrate + sweeper extras |
-| Phase 6 | `__tests__/plugins/*` |
-| Phase 7 | `__tests__/core/multiWorker.ts` |
+| Phase 2 | `__tests__/core/connection.test.ts` + `connectionError.test.ts` (+ illegal schema, BYO pool, migrate, locks, leader) |
+| Phase 3 | `__tests__/core/queue.test.ts` (minus live-worker slices deferred to 4) |
+| Phase 4 | `__tests__/core/worker.test.ts`, remaining queue worker-status, multi-process + priority extras |
+| Phase 5 | `__tests__/core/scheduler.test.ts`, automigrate + sweeper extras |
+| Phase 6 | `__tests__/plugins/*.test.ts` |
+| Phase 7 | `__tests__/core/multiWorker.test.ts` |
 
 If a row above is missing when you start this phase, that is a **bug in an earlier phase** — go back and fix that plan/PR. Do not dump the entire suite into one late PR.
 
@@ -38,14 +38,17 @@ If a row above is missing when you start this phase, that is a **bug in an earli
 
 ```ts
 connectionDetails: ConnectionOptions
+cleanConnectionDetails(): ConnectionOptions
 timeout: number
 queue: string
 schema: string
-connect / disconnect / cleanup
-popFromQueue(): Promise<string | null>
+connect / disconnect / cleanup / migrate / dropSchema
+popFromQueue(): Promise<never> // throws until Phase 3
 ```
 
 **Isolation:** truncate + migrate once in `beforeAll` for speed, or per-file schema. Keep Bun `--max-concurrency=1` until proven otherwise. Do not pass `bun test --concurrency=1` — that is not a Bun flag. Node compatibility is the Phase 1 `node-package` job, not a second test runner.
+
+**File naming:** Bun discovers only `*.test.ts` / `*.spec.ts` (and `_test_` / `_spec_`). Keep node-resque's `describe`/`test` titles; use `__tests__/core/<name>.test.ts` instead of bare `<name>.ts`.
 
 ## Matrix
 
@@ -53,25 +56,25 @@ Legend: **Port** = must exist and pass (ideally already, from Phases 2–7). **S
 
 Use this table as a **checklist in this phase's PR**: tick what is already green, add anything missing.
 
-### `__tests__/core/connection.ts`
+### `__tests__/core/connection.test.ts` (node-resque: `connection.ts`)
 
 | Test | Verdict | Notes |
 | --- | --- | --- |
-| should start with no redis keys in the namespace | **Adapt** | After cleanup, no `job` rows and no `pgrq_*` rows |
+| should start with no redis keys in the namespace | **Adapt** ✅ Phase 2 | After cleanup, no `job` rows and no `pgrq_*` rows |
 | it has loaded Lua commands | **Skip** | No Lua |
 | getKeys returns appropriate keys | **Skip** | Redis SCAN |
 | keys built with the default namespace | **Skip** | Redis key prefix |
 | ioredis transparent key prefix… | **Skip** | |
-| keys built with a custom namespace | **Adapt** | `schema` option sets pg-boss schema; `migrate` sees that schema |
+| keys built with a custom namespace | **Adapt** ✅ Phase 2 | `schema` option sets pg-boss schema; `migrate` sees that schema |
 | keys built with a array namespace | **Skip** | array namespace not supported |
 | will properly build namespace strings dynamically | **Skip** | |
-| will select redis db from options | **Adapt** | `database` string selects Postgres database (integration: skip if we cannot create DBs; then skip with reason) |
+| will select redis db from options | **Adapt** ✅ Phase 2 | `database` string selects Postgres database via discrete ConnectionOptions |
 | removes empty namespace from generated key | **Skip** | empty schema illegal; we reject |
-| removes the redis event listeners when end | **Adapt** | pool / boss error listeners removed on `end()` |
+| removes the redis event listeners when end | **Adapt** ✅ Phase 2 | pool / boss error listeners removed on `end()` (BYO pool) |
 
-### `__tests__/core/connectionError.ts`
+### `__tests__/core/connectionError.test.ts` (node-resque: `connectionError.ts`)
 
-**Port** — connecting to a bad host emits error / rejects. Point at `127.0.0.1:1` or invalid user.
+**Port** ✅ Phase 2 — connecting to a bad host/port emits error / rejects. Point at `127.0.0.1:1` or invalid user.
 
 ### `__tests__/core/queue.ts`
 
@@ -146,7 +149,8 @@ If an assertion cannot be identical, add a row (may already have rows from earli
 
 | Test name | node-resque assertion | Ours | Why |
 | --- | --- | --- | --- |
-| *(none yet)* | | | |
+| keys built with a custom namespace | `connection.key("thing") === "customNamespace:thing"` | `connection.schema === customSchema` and `pgrq_locks` exists in that schema | Keys are not Redis-prefixed; schema replaces namespace |
+| removes the redis event listeners when end | `redis.listenerCount("error"|"end")` | `pool`/`boss` `listenerCount("error")` with BYO pool | No Redis `end` event; we forward `error` only |
 
 PRs that add rows must explain. "Postgres is different" is not enough if the Queue API can still match.
 
@@ -171,3 +175,4 @@ Docs site can describe a real API. Phase 10 can trust tests that have been runni
 - 2026-08-26 (plan): This phase is an audit, not the first test suite. Tests ship with Phases 1–7; CI has been running since Phase 1.
 - 2026-08-26: Phase 1 corrected the runner to `node:test` on a Bun + Node matrix. Isolation uses `--max-concurrency=1` / `--test-concurrency=1`, not `bun test --concurrency=1`.
 - 2026-08-26: Phase 1 reverted the suite to `bun:test`. Node is covered by importing `dist/` (`test:node-package`), not by running this matrix on `node --test`.
+- 2026-08-26: Phase 2 — Bun requires `.test.ts` (or `.spec` / `_test_` / `_spec_`) in the filename. Matrix paths are `__tests__/core/<name>.test.ts` while describe/test titles stay node-resque-identical. Later phases must not copy bare `connection.ts`-style names or CI will skip them.
