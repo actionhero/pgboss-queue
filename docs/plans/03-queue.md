@@ -1,6 +1,6 @@
 # Phase 3 — Queue
 
-**Status:** in-progress  
+**Status:** done  
 **Depends on:** Phase 2
 
 ## Goal
@@ -133,3 +133,4 @@ Recommended split:
 - 2026-08-29: pg-boss v12 queues are explicit configuration rows/partitions, so Queue lazily calls `getQueue`/`createQueue` before `send`. Queue defaults are `retryLimit: 0` and `deleteAfterSeconds: 0` (pg-boss defines `0` as never auto-delete); scheduler retention remains authoritative.
 - 2026-08-29: Delayed duplicate identity is reserved in `pgrq_locks` under a private `timestamps:{payload}:delayed:{second}` key until the scheduled second passes. This makes concurrent duplicate checks atomic without modifying pg-boss's partitioned `job` schema; `locks()` intentionally exposes only plugin `lock:*` and `workerslock:*` rows.
 - 2026-08-29: Upstream queue tests schedule at Unix millisecond `10000`, but pg-boss correctly treats 1970 timestamps as immediately runnable. The PostgreSQL port uses future rounded timestamps while retaining the same test titles and timestamp-unit assertions.
+- 2026-08-29: Phase 3 completed with 36 Queue tests passing against PostgreSQL (plus six live-Worker titles explicitly deferred to Phase 4). The full suite, Biome, TypeScript build, and Node package import are green.

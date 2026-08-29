@@ -36,6 +36,7 @@ export interface ConnectionOptions {
 
 export interface QueueOptions {
   connection?: ConnectionOptions;
+  queue?: string | string[]; // node-resque constructor compatibility
 }
 
 export interface WorkerOptions extends QueueOptions {
@@ -231,3 +232,4 @@ Do not defer these to Phase 8.
 - 2026-08-26: pg-boss is a named ESM export (`import { PgBoss } from "pg-boss"`), not a default export. Migrator instances use `migrate: true` + `supervise: false` + `schedule: false`.
 - 2026-08-26: Version bumped `0.0.1` → `0.1.0` (first user-facing API: `Connection`).
 - 2026-08-26: Node ESM (`"type": "module"`) requires relative import specifiers with `.js` extensions in emitted `dist/` (e.g. `from "./core/connection.js"`). Without them, `node scripts/assert-node-package.mjs` fails with `ERR_MODULE_NOT_FOUND` even though `tsc` and Bun tests pass.
+- 2026-08-29: Phase 3 restored node-resque's optional `QueueOptions.queue` field. Queue methods still take an explicit queue name, but retaining the constructor field lets existing typed call sites migrate without an excess-property error.
