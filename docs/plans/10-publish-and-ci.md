@@ -41,7 +41,7 @@ Keryx:
 6. `actions/setup-node` with `registry-url: https://registry.npmjs.org`
 7. `npm install -g npm@latest` (OIDC / provenance)
 
-**Intended setup:** npm **trusted publishing** (OIDC) so no long-lived `NPM_TOKEN`. Configure the npm package to trust GitHub Actions on `actionhero/pgboss-queue`. Fallback: `NPM_TOKEN`. Document both in this phase's PR.
+**Intended setup:** npm **trusted publishing** (OIDC) so no long-lived `NPM_TOKEN`. Configure the npm package to trust GitHub Actions on `actionhero/pg-queue`. Fallback: `NPM_TOKEN`. Document both in this phase's PR.
 
 ```yaml
 name: Publish
@@ -71,7 +71,7 @@ jobs:
         id: version
         run: |
           LOCAL=$(node -p "require('./package.json').version")
-          REMOTE=$(npm view pgboss-queue version 2>/dev/null || echo "0.0.0")
+          REMOTE=$(npm view pg-queue version 2>/dev/null || echo "0.0.0")
           echo "local=$LOCAL" >> "$GITHUB_OUTPUT"
           echo "remote=$REMOTE" >> "$GITHUB_OUTPUT"
           if [ "$LOCAL" != "$REMOTE" ]; then
@@ -107,7 +107,7 @@ Do not publish `0.0.1` empty stubs. First intentional bump to `0.1.0` is the fir
 Port node-resque `examples/` in Phases 4–7. This phase can add a compose-based example command if missing:
 
 ```bash
-DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgboss_queue_test bun examples/example.ts
+DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgqueue_test bun examples/example.ts
 ```
 
 Optional: `examples/docker` like node-resque — not required for v1.
@@ -126,7 +126,7 @@ README (user-facing): GitHub Test workflow badge (the Phase 1 workflow), npm ver
 
 ## After 1.0
 
-- Keryx consumes `pgboss-queue` instead of in-tree `PgBossBackend`
+- Keryx consumes `pg-queue` instead of in-tree `PgBossBackend`
 - Optional admin UI package (resque-admin against SQL)
 - `LISTEN/NOTIFY` as an opt-in latency flag (`useListenNotify`)
 
@@ -135,3 +135,4 @@ README (user-facing): GitHub Test workflow badge (the Phase 1 workflow), npm ver
 - 2026-08-26 (plan): Test CI is Phase 1. This phase is only Pages + npm publish.
 - 2026-08-26: Phase 1 already matrices Bun and Node 26 in `test.yaml`. Example runs use `DATABASE_URL`; there is no repo `docker-compose.yml`.
 - 2026-08-26: Phase 1 dropped the suite matrix. `test` is Bun; `node-package` only imports `dist/` on Node 26.
+- 2026-08-29: npm package name changed to `pg-queue`; package contents must include `migrations/` because runtime schema installation reads the numbered SQL files.

@@ -1,6 +1,6 @@
 {
-  "name": "pgboss-queue",
-  "version": "0.2.0",
+  "name": "pg-queue",
+  "version": "0.3.0",
   "description": "A PostgreSQL-backed background job queue with the node-resque runtime model",
   "type": "module",
   "main": "./dist/index.js",
@@ -12,7 +12,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "migrations"
   ],
   "engines": {
     "node": ">=26"
@@ -26,8 +27,7 @@
     "format": "biome check --write ."
   },
   "dependencies": {
-    "pg": "^8.23.0",
-    "pg-boss": "^12.28.0"
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",

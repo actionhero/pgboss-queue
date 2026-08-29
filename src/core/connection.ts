@@ -1,19 +1,30 @@
 import { EventEmitter } from "node:events";
+import { readFile } from "node:fs/promises";
 import {
   Pool,
   type PoolConfig,
   type QueryResult,
   type QueryResultRow,
 } from "pg";
-import { PgBoss } from "pg-boss";
 
-const DEFAULT_SCHEMA = "pgboss_queue";
-const DEFAULT_APPLICATION_NAME = "pgboss-queue";
+const DEFAULT_SCHEMA = "pgqueue";
+const DEFAULT_APPLICATION_NAME = "pg-queue";
 const SCHEMA_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 const LEADER_SLOT = "default";
+const MIGRATIONS = [{ version: 1, name: "initial", file: "001_initial.sql" }];
+
+/** A job atomically claimed from a queue. */
+export interface FetchedJob<T = unknown> {
+  /** Stable UUID. */
+  id: string;
+  /** Queue name. */
+  name: string;
+  /** Application payload. */
+  data: T;
+}
 
 /**
- * Postgres connection options for pgboss-queue.
+ * PostgreSQL connection options for pg-queue.
  *
  * Maps from node-resque Redis options as follows:
  * - `{ host, port, password, database: 0 }` → `{ connectionString }` or
@@ -44,12 +55,9 @@ export interface ConnectionOptions {
    * Analogous to passing `redis: ioredisInstance`.
    */
   pool?: Pool;
-  /**
-   * pg-boss schema AND our metadata schema. Default `pgboss_queue`.
-   * Must match `^[a-zA-Z_][a-zA-Z0-9_]*$` (reject otherwise).
-   */
+  /** Queue schema. Default `pgqueue`; must be a legal SQL identifier. */
   schema?: string;
-  /** Reported to Postgres as `application_name`. Default `pgboss-queue`. */
+  /** Reported to Postgres as `application_name`. Default `pg-queue`. */
   application_name?: string;
 }
 
@@ -84,7 +92,7 @@ export interface SchedulerOptions extends QueueOptions {
   leaderLockTimeout?: number;
   stuckWorkerTimeout?: number | false;
   retryStuckJobs?: boolean;
-  /** Leader runs pg-boss migrate + metadata DDL. Default `true`. */
+  /** Leader runs pg-queue migrations. Default `true`. */
   automigrate?: boolean;
   /**
    * Leader deletes completed/cancelled jobs older than this. Default 24h.
@@ -104,12 +112,10 @@ export interface MultiWorkerOptions extends WorkerOptions {
 }
 
 /**
- * Postgres + pg-boss connection used by Queue, Worker, and Scheduler.
+ * PostgreSQL connection used by Queue, Worker, and Scheduler.
  *
  * Call {@link Connection.migrate} (via the elected scheduler, or explicitly in
- * tests/deploy) before workers expect a usable schema. Instances constructed for
- * workers/queues always use `migrate: false`, `supervise: false`, and
- * `schedule: false` on pg-boss.
+ * tests/deploy) before workers expect a usable schema.
  */
 export class Connection extends EventEmitter {
   /** Resolved connection options (defaults applied). */
@@ -119,14 +125,11 @@ export class Connection extends EventEmitter {
 
   private eventListeners: {
     poolError?: (error: Error) => void;
-    bossError?: (error: Error) => void;
   } = {};
 
   private _pool: Pool | undefined;
-  private _boss: PgBoss | undefined;
   private _schema: string;
   private ownsPool = false;
-  private bossStarted = false;
 
   /**
    * @param options - Postgres connection options. Redis options are rejected.
@@ -155,7 +158,7 @@ export class Connection extends EventEmitter {
     this.connected = false;
   }
 
-  /** Validated pg-boss / metadata schema name. */
+  /** Validated queue schema name. */
   get schema(): string {
     return this._schema;
   }
@@ -172,20 +175,7 @@ export class Connection extends EventEmitter {
   }
 
   /**
-   * pg-boss client started with `migrate`/`supervise`/`schedule` disabled.
-   * @throws If not connected.
-   */
-  get boss(): PgBoss {
-    if (!this._boss) {
-      throw new Error("Connection is not connected");
-    }
-    return this._boss;
-  }
-
-  /**
-   * Open the pool (unless `pool` was provided), construct pg-boss, and start it
-   * when the schema is already installed. If pg-boss is not installed yet,
-   * the pool stays usable so {@link Connection.migrate} can run.
+   * Open the pool (unless `pool` was provided) and verify it with `SELECT 1`.
    *
    * @throws On connection failure (emits `error` as well).
    */
@@ -193,34 +183,28 @@ export class Connection extends EventEmitter {
     if (this.connected) return;
 
     try {
-      await this.ensurePoolAndBoss();
-      await this.tryStartBoss();
+      this.ensurePool();
+      await this.pool.query("SELECT 1");
       this.connected = true;
     } catch (error) {
       const err = toError(error);
-      this.emit("error", err);
       await this.teardownPartialConnect();
+      this.emit("error", err);
       throw err;
     }
   }
 
   /**
-   * Stop pg-boss and, if we created the pool, end it. Provided pools are left open.
-   * Removes forwarded `error` listeners from the pool and boss.
+   * End an owned pool. Provided pools are left open.
+   * Removes the forwarded pool `error` listener.
    */
   async end(): Promise<void> {
     this.removeForwardedListeners();
-
-    if (this._boss && this.bossStarted) {
-      await this._boss.stop({ graceful: true, close: false });
-      this.bossStarted = false;
-    }
 
     if (this.ownsPool && this._pool) {
       await this._pool.end();
     }
 
-    this._boss = undefined;
     this._pool = undefined;
     this.ownsPool = false;
     this.connected = false;
@@ -257,37 +241,99 @@ export class Connection extends EventEmitter {
   }
 
   /**
-   * Idempotently install the schema: `CREATE SCHEMA`, pg-boss migrate, and
-   * `pgrq_*` metadata tables/indexes. Intended for the scheduler leader (or tests).
+   * Atomically claim the next ready job using `FOR UPDATE SKIP LOCKED`.
+   *
+   * @param queue - Queue to claim from.
+   * @returns The claimed job, or `null` when no job is ready.
+   */
+  async fetchJob<T = unknown>(queue: string): Promise<FetchedJob<T> | null> {
+    const result = await this.query<
+      QueryResultRow & { id: string; name: string; data: T }
+    >(
+      `WITH candidate AS (
+         SELECT id
+         FROM ${this._schema}.pgrq_jobs
+         WHERE name = $1
+           AND state IN ('created', 'retry')
+           AND start_after <= now()
+         ORDER BY priority DESC, created_on, id
+         FOR UPDATE SKIP LOCKED
+         LIMIT 1
+       )
+       UPDATE ${this._schema}.pgrq_jobs AS job
+       SET state = 'active', started_on = now()
+       FROM candidate
+       WHERE job.id = candidate.id
+       RETURNING job.id, job.name, job.data`,
+      [queue],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  /**
+   * Delete one job by queue and id.
+   *
+   * @param queue - Queue containing the job.
+   * @param id - Job UUID.
+   * @returns Whether a job was deleted.
+   */
+  async deleteJob(queue: string, id: string): Promise<boolean> {
+    const result = await this.query(
+      `DELETE FROM ${this._schema}.pgrq_jobs WHERE name = $1 AND id = $2`,
+      [queue, id],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  /**
+   * Apply all pending versioned SQL migrations under a transaction-scoped
+   * advisory lock. Safe to call concurrently from multiple processes.
    *
    * @throws If the pool cannot be opened or migration SQL fails.
    */
   async migrate(): Promise<void> {
-    if (!this._pool || !this._boss) {
-      await this.ensurePoolAndBoss();
-      this.connected = true;
-    }
+    await this.connect();
 
     const schema = this._schema;
-    await this.pool.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+        ["pg-queue:migrate", schema],
+      );
+      await client.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS ${schema}.pgrq_migrations (
+          version     integer PRIMARY KEY,
+          name        text NOT NULL,
+          applied_at  timestamptz NOT NULL DEFAULT now()
+        )
+      `);
 
-    const migrator = new PgBoss({
-      db: this.dbAdapter(),
-      schema,
-      migrate: true,
-      supervise: false,
-      schedule: false,
-      application_name: this.options.application_name,
-    });
+      const applied = await client.query<{ version: number }>(
+        `SELECT version FROM ${schema}.pgrq_migrations`,
+      );
+      const versions = new Set(applied.rows.map((row) => row.version));
 
-    await migrator.start();
-    await migrator.stop({ graceful: true, close: false });
-
-    await this.applyMetadataDdl();
-
-    if (!this.bossStarted) {
-      await this.boss.start();
-      this.bossStarted = true;
+      for (const migration of MIGRATIONS) {
+        if (versions.has(migration.version)) continue;
+        const sql = await loadMigration(migration.file, schema);
+        await client.query(sql);
+        await client.query(
+          `INSERT INTO ${schema}.pgrq_migrations (version, name)
+           VALUES ($1, $2)`,
+          [migration.version, migration.name],
+        );
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {
+        // Preserve the original migration error.
+      });
+      throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -472,7 +518,7 @@ export class Connection extends EventEmitter {
     return result.rows[0]?.name ?? null;
   }
 
-  private async ensurePoolAndBoss(): Promise<void> {
+  private ensurePool(): void {
     if (!this._pool) {
       if (this.options.pool) {
         this._pool = this.options.pool;
@@ -482,69 +528,7 @@ export class Connection extends EventEmitter {
         this.ownsPool = true;
       }
     }
-
-    if (!this._boss) {
-      this._boss = new PgBoss({
-        db: this.dbAdapter(),
-        schema: this._schema,
-        migrate: false,
-        supervise: false,
-        schedule: false,
-        application_name: this.options.application_name,
-      });
-    }
-
     this.attachForwardedListeners();
-  }
-
-  private async tryStartBoss(): Promise<void> {
-    if (!this._boss || this.bossStarted) return;
-
-    try {
-      await this._boss.start();
-      this.bossStarted = true;
-    } catch (error) {
-      if (isPgBossNotInstalled(error)) {
-        return;
-      }
-      throw error;
-    }
-  }
-
-  private async applyMetadataDdl(): Promise<void> {
-    const schema = this._schema;
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS ${schema}.pgrq_leader (
-        slot        text PRIMARY KEY DEFAULT 'default',
-        name        text NOT NULL,
-        expires_at  timestamptz NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS ${schema}.pgrq_workers (
-        name        text PRIMARY KEY,
-        queues      text NOT NULL,
-        started_at  timestamptz NOT NULL DEFAULT now(),
-        ping_at     timestamptz NOT NULL DEFAULT now(),
-        working_on  jsonb
-      );
-
-      CREATE TABLE IF NOT EXISTS ${schema}.pgrq_locks (
-        key         text PRIMARY KEY,
-        value       text,
-        expires_at  timestamptz NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS ${schema}.pgrq_stats (
-        name        text PRIMARY KEY,
-        value       bigint NOT NULL DEFAULT 0
-      );
-
-      CREATE INDEX IF NOT EXISTS pgrq_workers_ping_at_idx
-        ON ${schema}.pgrq_workers (ping_at);
-
-      CREATE INDEX IF NOT EXISTS pgrq_locks_expires_at_idx
-        ON ${schema}.pgrq_locks (expires_at);
-    `);
   }
 
   private buildPoolConfig(): PoolConfig {
@@ -574,60 +558,33 @@ export class Connection extends EventEmitter {
     };
   }
 
-  private dbAdapter(): {
-    executeSql: (
-      text: string,
-      values?: unknown[],
-    ) => Promise<QueryResult<QueryResultRow>>;
-  } {
-    return {
-      executeSql: (text: string, values?: unknown[]) =>
-        this.pool.query(text, values),
-    };
-  }
-
   private attachForwardedListeners(): void {
-    if (!this._pool || !this._boss) return;
+    if (!this._pool) return;
 
     this.removeForwardedListeners();
 
     this.eventListeners.poolError = (error: Error) => {
       this.emit("error", error);
     };
-    this.eventListeners.bossError = (error: Error) => {
-      this.emit("error", error);
-    };
-
     this._pool.on("error", this.eventListeners.poolError);
-    this._boss.on("error", this.eventListeners.bossError);
   }
 
   private removeForwardedListeners(): void {
     if (this._pool && this.eventListeners.poolError) {
       this._pool.off("error", this.eventListeners.poolError);
     }
-    if (this._boss && this.eventListeners.bossError) {
-      this._boss.off("error", this.eventListeners.bossError);
-    }
     this.eventListeners = {};
   }
 
   private async teardownPartialConnect(): Promise<void> {
     this.removeForwardedListeners();
-    if (this._boss && this.bossStarted) {
-      await this._boss.stop({ graceful: false, close: false }).catch(() => {
-        // best-effort cleanup after a failed connect
-      });
-    }
     if (this.ownsPool && this._pool) {
       await this._pool.end().catch(() => {
         // best-effort cleanup after a failed connect
       });
     }
-    this._boss = undefined;
     this._pool = undefined;
     this.ownsPool = false;
-    this.bossStarted = false;
     this.connected = false;
   }
 }
@@ -639,6 +596,11 @@ export class Connection extends EventEmitter {
 export function assertSchema(schema: string): void {
   if (!SCHEMA_PATTERN.test(schema)) {
     throw new Error(`Invalid schema "${schema}": must match ${SCHEMA_PATTERN}`);
+  }
+  if (schema.toLowerCase().startsWith("pg_")) {
+    throw new Error(
+      `Invalid schema "${schema}": PostgreSQL reserves the "pg_" prefix`,
+    );
   }
 }
 
@@ -666,15 +628,13 @@ function rejectRedisOptions(options: ConnectionOptions): void {
   }
 }
 
-function isPgBossNotInstalled(error: unknown): boolean {
-  const message = toError(error).message.toLowerCase();
-  return (
-    message.includes("not installed") ||
-    (message.includes("schema") && message.includes("missing"))
-  );
-}
-
 function toError(error: unknown): Error {
   if (error instanceof Error) return error;
   return new Error(String(error));
+}
+
+async function loadMigration(file: string, schema: string): Promise<string> {
+  const url = new URL(`../../migrations/${file}`, import.meta.url);
+  const sql = await readFile(url, "utf8");
+  return sql.replaceAll("{{schema}}", schema);
 }

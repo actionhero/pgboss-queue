@@ -5,7 +5,7 @@
 
 ## Goal
 
-Implement `Queue` so programs can enqueue work, inspect it, delete it, and manage failures — the node-resque Queue methods, backed by pg-boss `job` rows plus our metadata tables.
+Implement `Queue` so programs can enqueue work, inspect it, delete it, and manage failures — the node-resque Queue methods, backed by `pgrq_jobs` plus our metadata tables.
 
 Workers are not required yet. Tests enqueue and SQL-inspect (or use a test helper `popFromQueue` that `fetch`es a job).
 
@@ -17,19 +17,14 @@ node-resque:
 encode(q, func, args) => JSON.stringify({ class: func, queue: q, args })
 ```
 
-Store that object as pg-boss `data`. Queue name is pg-boss job `name` (one pg-boss queue per resque queue).
+Store that object as `pgrq_jobs.data`. Queue name is `pgrq_jobs.name`.
 
 ```ts
-await boss.send(q, { class: func, queue: q, args }, {
-  retryLimit: 0,          // Retry plugin owns retries
-  startAfter?: Date,      // enqueueAt / enqueueIn
-});
+INSERT INTO pgrq_jobs (name, data, start_after)
+VALUES (q, { class: func, queue: q, args }, startAfter);
 ```
 
-`createQueue(q)` before first send if needed (keryx `ensureQueue`). Default queue options:
-
-- `retryLimit: 0`
-- `deleteAfterSeconds`: large (e.g. 30 days) so pg-boss will not delete out from under us; **our sweeper** is the real retention (Phase 5). Alternatively omit delete policy if pg-boss leaves rows until we `deleteJob`.
+Insert `pgrq_queues` with `ON CONFLICT DO NOTHING` before the job insert. The leader sweeper is the sole retention mechanism (Phase 5).
 
 ## Methods (port `src/core/queue.ts`)
 
@@ -43,7 +38,7 @@ Implement every public method. Behavior notes where Postgres differs:
 
 ### Queue admin
 
-- `queues()` — union of pg-boss `getQueues()` names and distinct `job.name`.
+- `queues()` — names from `pgrq_queues`.
 - `delQueue(q)` — delete all jobs in that queue (any state except maybe `active` — document: active jobs are not deleted; match "delete the list" as best-effort). Drop from known queues.
 - `length(q)` — count `created`/`retry` with `start_after <= now()` (ready, not delayed).
 - `queued(q, start, stop)` — same filter, `ORDER BY created_on`, offset/limit. Map to `ParsedJob`.
@@ -64,7 +59,7 @@ Treat delayed as `state IN ('created','retry') AND start_after > now()`.
 
 - `locks()` — all `pgrq_locks` rows (strip expired). Keys should look like `lock:…` / `workerslock:…` so plugin tests pass.
 - `delLock(key)`
-- `stats()` — `pgrq_stats` plus optionally pg-boss state counts under extra keys (keep `processed` / `failed` names).
+- `stats()` — `pgrq_stats` (keep `processed` / `failed` names).
 - `leader()` / `leaderKey()` — `pgrq_leader.name` (leaderKey can return the slot name for tests that only check non-empty).
 
 ### Workers (tables filled in Phase 4; methods exist now)
@@ -80,7 +75,7 @@ Return types must match `ParsedWorkerPayload` / `ErrorPayload`.
 
 ### Failed jobs
 
-pg-boss `failed` rows → `ParsedFailedJobPayload`:
+Failed `pgrq_jobs` rows → `ParsedFailedJobPayload`:
 
 ```ts
 {
@@ -99,7 +94,7 @@ node-resque `failed(start,stop)` uses list indices; we `ORDER BY completed_on` o
 - `failedCount()`
 - `failed(start, stop)`
 - `removeFailed(failedJob)` — delete that row. Matching: prefer `failedJob` identity. If tests pass the whole payload, match on `payload` + `failed_at` or store `id` on our mapped object as an extra enumerable field (keryx added `id`). Adding `id?: string` to the payload type is allowed if tests still pass; include it.
-- `retryAndRemoveFailed(failedJob)` — `boss.retry(queue, id)` or re-`enqueue` + delete. Throw `This job is not in failed queue` if nothing matched.
+- `retryAndRemoveFailed(failedJob)` — re-`enqueue` + delete. Throw `This job is not in failed queue` if nothing matched.
 
 ## Plugin runner
 
@@ -116,7 +111,7 @@ Skip only tests that poke Redis keys directly if any remain inside queue.ts (the
 ## Acceptance criteria
 
 - All Queue methods exist with JSDoc copied/adapted from node-resque
-- `__tests__/core/queue.test.ts` is green. Worker-status methods are tested with seeded `pgrq_workers` and active pg-boss jobs; Phase 4 will additionally exercise them through a live Worker.
+- `__tests__/core/queue.test.ts` is green. Worker-status methods are tested with seeded `pgrq_workers` and active jobs; Phase 4 will additionally exercise them through a live Worker.
 
 Recommended split:
 
@@ -143,3 +138,6 @@ Recommended split:
 - 2026-08-29: Bugbot: delayed duplicate lock keys embedded the encoded JSON and overflowed the `pgrq_locks` btree for large payloads. Keys now use `sha256(encoded)` plus the timestamp second.
 - 2026-08-29: Bugbot: `delQueue` rebuilt those keys from jsonb-loaded args, whose object key order can differ from `JSON.stringify` at enqueue time. The hash now canonicalizes nested object keys so delete and re-enqueue agree.
 - 2026-08-29: Coverage audit found untested `del(count)`, `delByFunction(start, stop)`, expired-lock cleanup, concurrent delayed enqueue, queue-row serialization, `cleanOldWorkers`, `retryStuckJobs`, active `workingOn`, and unknown-worker errors. These now have focused PostgreSQL tests rather than being deferred wholesale to Phase 4.
+- 2026-08-29: Removed pg-boss before Worker implementation. Queue registration is now an idempotent `pgrq_queues` insert, enqueue writes `pgrq_jobs`, and test dequeues use the same atomic `Connection.fetchJob()` primitive planned for Worker.
+- 2026-08-29: Bugbot: `sendJob` / failed-job insert can lose a race with `delQueue` between `ensureQueue` and the `pgrq_jobs` write (FK 23503). Those writes now retry once after recreating the queue row.
+- 2026-08-29: Bugbot: immediate enqueue uses `COALESCE($start_after, now())` so eligibility is compared against PostgreSQL time, matching `fetchJob` / `length` / `queued`. Delayed jobs still pass an explicit timestamp.

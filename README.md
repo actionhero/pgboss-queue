@@ -1,11 +1,11 @@
-# pgboss-queue
+# pg-queue
 
 **Background jobs in Node.js, backed by Postgres.**
 
-`pgboss-queue` is a queue-based job system with the same Worker / Scheduler / Queue API as [node-resque](https://github.com/actionhero/node-resque): priority queues, delayed jobs, plugins, locking, failed-job management, and a leader-elected scheduler. Storage is PostgreSQL via [pg-boss](https://github.com/timgit/pg-boss) (`SELECT … FOR UPDATE SKIP LOCKED`), not Redis.
+`pg-queue` is a queue-based job system with the same Worker / Scheduler / Queue API as [node-resque](https://github.com/actionhero/node-resque): priority queues, delayed jobs, plugins, locking, failed-job management, and a leader-elected scheduler. Storage is PostgreSQL (`SELECT … FOR UPDATE SKIP LOCKED`), not Redis.
 
 ```ts
-import { Queue, Worker, Scheduler, Plugins } from "pgboss-queue";
+import { Queue, Worker, Scheduler, Plugins } from "pg-queue";
 
 const connection = {
   connectionString: process.env.DATABASE_URL,
@@ -55,7 +55,7 @@ Pass a Postgres URL (not a Redis URL):
 ```ts
 const connection = {
   connectionString: "postgres://user:pass@host:5432/dbname",
-  schema: "pgboss_queue", // optional; default "pgboss_queue"
+  schema: "pgqueue", // optional; default "pgqueue"
 };
 ```
 
@@ -77,7 +77,7 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const connection = { pool };
 ```
 
-`schema` isolates this library's tables (pg-boss's `job` table plus worker/lock/leader metadata) inside one Postgres database. It must be a legal SQL identifier (`letters`, `numbers`, `_`).
+`schema` isolates this library's `pgrq_*` tables inside one Postgres database. It defaults to `pgqueue` and must be a legal SQL identifier (`letters`, `numbers`, `_`) that does not begin with PostgreSQL's reserved `pg_` prefix.
 
 Coming from node-resque: replace `{ host, port, password, database: 0 }` / `{ redis }` / `{ namespace: "resque" }` with `{ connectionString }` or `{ pool }` and `{ schema }`.
 
@@ -142,7 +142,7 @@ Worker names must follow `hostname:pid` or `hostname:pid+unique_id` if you run m
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `automigrate` | `true` | Leader applies pg-boss schema migrations and metadata tables. Workers never migrate. |
+| `automigrate` | `true` | Leader applies the bundled versioned SQL migrations. Workers never migrate. |
 | `completeJobRetentionMs` | `24 * 60 * 60 * 1000` | Leader deletes **completed** (and cancelled) jobs older than this. Failed jobs are kept until you retry or remove them. `false` disables the sweeper. `0` deletes completed jobs as soon as the leader sees them. |
 | `stuckWorkerTimeout` | 1 hour | If a worker has not pinged within this window, fail its in-flight job and remove it. Set `false` to disable. |
 | `leaderLockTimeout` | 180 seconds | Leader lock TTL; refreshed while the leader is alive. |
@@ -237,7 +237,7 @@ schedule.scheduleJob("0 * * * * *", async () => {
 Jobs may list plugins that extend `Plugin`. Hooks: `beforeEnqueue`, `afterEnqueue`, `beforePerform`, `afterPerform`. `before*` hooks return `true` to continue or `false` to skip.
 
 ```ts
-import { Plugin } from "pgboss-queue";
+import { Plugin } from "pg-queue";
 
 class MyPlugin extends Plugin {
   async beforeEnqueue() {
@@ -274,7 +274,7 @@ Inspect or delete plugin locks with `queue.locks()` and `queue.delLock(key)`.
 `MultiWorker` wraps `Worker` and scales the number of in-process workers from `minTaskProcessors` to `maxTaskProcessors` based on event-loop delay (more workers for I/O-bound jobs, fewer when the loop is blocked).
 
 ```ts
-import { MultiWorker } from "pgboss-queue";
+import { MultiWorker } from "pg-queue";
 
 const multiWorker = new MultiWorker(
   {
@@ -306,9 +306,9 @@ Raise your Postgres pool `max` when using a large `maxTaskProcessors`. Events ma
 - PostgreSQL 13+ (`SKIP LOCKED`)
 
 ```bash
-npm install pgboss-queue
+npm install pg-queue
 # or
-bun add pgboss-queue
+bun add pg-queue
 ```
 
 ## License

@@ -10,7 +10,7 @@ import { runPlugins } from "./pluginRunner.js";
 const QUEUED_STATES = ["created", "retry"] as const;
 const DUPLICATE_ERROR = "Job already enqueued at this time with same arguments";
 
-/** Payload stored in pg-boss's `job.data` column. */
+/** Payload stored in the queue job table's `data` column. */
 export interface ParsedJob {
   /** Registered job name. */
   class: string;
@@ -32,13 +32,13 @@ export interface ParsedWorkerPayload {
   worker: string;
   /** Encoded job payload. */
   payload: ParsedJob;
-  /** pg-boss job id recorded by the worker, when present. */
+  /** Job id recorded by the worker, when present. */
   id?: string;
 }
 
 /** Failed-job representation returned by Queue inspection methods. */
 export interface ParsedFailedJobPayload extends ErrorPayload {
-  /** pg-boss job id used for precise removal and retry. */
+  /** Job id used for precise removal and retry. */
   id?: string;
 }
 
@@ -61,15 +61,15 @@ interface WorkerRow extends QueryResultRow {
 /**
  * PostgreSQL-backed node-resque Queue API.
  *
- * Queue methods use pg-boss for insertion and its `job` table for compatible
- * inspection and administration.
+ * Queue methods use pg-queue's versioned PostgreSQL schema for insertion,
+ * inspection, and administration.
  */
 export class Queue extends EventEmitter {
   /** Resolved Queue options. */
   readonly options: QueueOptions;
   /** Named jobs used by enqueue plugins and, later, Workers. */
   readonly jobs: Jobs;
-  /** Underlying PostgreSQL / pg-boss connection. */
+  /** Underlying PostgreSQL connection. */
   readonly connection: Connection;
 
   /**
@@ -84,7 +84,7 @@ export class Queue extends EventEmitter {
     this.connection.on("error", (error: Error) => this.emit("error", error));
   }
 
-  /** Connect the underlying PostgreSQL and pg-boss clients. */
+  /** Connect the underlying PostgreSQL client. */
   async connect(): Promise<void> {
     await this.connection.connect();
   }
@@ -212,20 +212,12 @@ export class Queue extends EventEmitter {
     );
   }
 
-  /** @returns All known pg-boss queue names and queue names present in jobs. */
+  /** @returns All known queue names. */
   async queues(): Promise<string[]> {
-    const [configured, jobs] = await Promise.all([
-      this.connection.boss.getQueues(),
-      this.connection.query<{ name: string }>(
-        `SELECT DISTINCT name FROM ${this.connection.schema}.job`,
-      ),
-    ]);
-    return Array.from(
-      new Set([
-        ...configured.map((queue) => queue.name),
-        ...jobs.rows.map((row) => row.name),
-      ]),
-    ).sort();
+    const result = await this.connection.query<{ name: string }>(
+      `SELECT name FROM ${this.connection.schema}.pgrq_queues ORDER BY name`,
+    );
+    return result.rows.map((row) => row.name);
   }
 
   /**
@@ -240,26 +232,29 @@ export class Queue extends EventEmitter {
     try {
       await client.query("BEGIN");
       const locked = await client.query(
-        `SELECT name FROM ${schema}.queue WHERE name = $1 FOR UPDATE`,
+        `SELECT name FROM ${schema}.pgrq_queues WHERE name = $1 FOR UPDATE`,
         [q],
       );
       const result = await client.query<{
         data: unknown;
         start_after: Date;
       }>(
-        `DELETE FROM ${schema}.job
+        `DELETE FROM ${schema}.pgrq_jobs
          WHERE name = $1 AND state <> 'active'
          RETURNING data, start_after`,
         [q],
       );
       const remaining = await client.query<{ exists: boolean }>(
         `SELECT EXISTS (
-           SELECT 1 FROM ${schema}.job WHERE name = $1
+           SELECT 1 FROM ${schema}.pgrq_jobs WHERE name = $1
          ) AS exists`,
         [q],
       );
       if (!remaining.rows[0]?.exists && (locked.rowCount ?? 0) > 0) {
-        await client.query(`SELECT ${schema}.delete_queue($1)`, [q]);
+        await client.query(
+          `DELETE FROM ${schema}.pgrq_queues WHERE name = $1`,
+          [q],
+        );
       }
       await client.query("COMMIT");
 
@@ -299,9 +294,9 @@ export class Queue extends EventEmitter {
   async length(q: string): Promise<number> {
     const result = await this.connection.query<{ count: string }>(
       `SELECT count(*)::text AS count
-       FROM ${this.connection.schema}.job
+       FROM ${this.connection.schema}.pgrq_jobs
        WHERE name = $1
-         AND state = ANY($2::${this.connection.schema}.job_state[])
+         AND state = ANY($2::text[])
          AND start_after <= now()`,
       [q, QUEUED_STATES],
     );
@@ -320,9 +315,9 @@ export class Queue extends EventEmitter {
     const range = sqlRange(start, stop);
     const result = await this.connection.query<JobRow>(
       `SELECT id, name, data, created_on, start_after
-       FROM ${this.connection.schema}.job
+       FROM ${this.connection.schema}.pgrq_jobs
        WHERE name = $1
-         AND state = ANY($2::${this.connection.schema}.job_state[])
+         AND state = ANY($2::text[])
          AND start_after <= now()
        ORDER BY created_on, id
        OFFSET $3
@@ -356,15 +351,15 @@ export class Queue extends EventEmitter {
     const result = await this.connection.query(
       `WITH selected AS (
          SELECT id
-         FROM ${this.connection.schema}.job
+         FROM ${this.connection.schema}.pgrq_jobs
          WHERE name = $1
-           AND state = ANY(ARRAY['created','retry']::${this.connection.schema}.job_state[])
+           AND state = ANY(ARRAY['created','retry']::text[])
            AND start_after <= now()
            AND data = $2::jsonb
          ORDER BY created_on ${direction}, id ${direction}
          ${limitSql}
        )
-       DELETE FROM ${this.connection.schema}.job
+       DELETE FROM ${this.connection.schema}.pgrq_jobs
        WHERE id IN (SELECT id FROM selected)`,
       values,
     );
@@ -390,15 +385,15 @@ export class Queue extends EventEmitter {
     const result = await this.connection.query(
       `WITH sliced AS (
          SELECT id, data
-         FROM ${this.connection.schema}.job
+         FROM ${this.connection.schema}.pgrq_jobs
          WHERE name = $1
-           AND state = ANY(ARRAY['created','retry']::${this.connection.schema}.job_state[])
+           AND state = ANY(ARRAY['created','retry']::text[])
            AND start_after <= now()
          ORDER BY created_on, id
          OFFSET $3
          ${range.limitSql}
        )
-       DELETE FROM ${this.connection.schema}.job
+       DELETE FROM ${this.connection.schema}.pgrq_jobs
        WHERE id IN (
          SELECT id FROM sliced WHERE data->>'class' = $2
        )`,
@@ -422,9 +417,9 @@ export class Queue extends EventEmitter {
   ): Promise<number[]> {
     const encoded = this.encode(q, func, arrayify(args));
     const result = await this.connection.query<{ start_after: Date }>(
-      `DELETE FROM ${this.connection.schema}.job
+      `DELETE FROM ${this.connection.schema}.pgrq_jobs
        WHERE name = $1
-         AND state = ANY(ARRAY['created','retry']::${this.connection.schema}.job_state[])
+         AND state = ANY(ARRAY['created','retry']::text[])
          AND start_after > now()
          AND data = $2::jsonb
        RETURNING start_after`,
@@ -456,9 +451,9 @@ export class Queue extends EventEmitter {
   ): Promise<number[]> {
     const result = await this.connection.query<{ start_after: Date }>(
       `SELECT start_after
-       FROM ${this.connection.schema}.job
+       FROM ${this.connection.schema}.pgrq_jobs
        WHERE name = $1
-         AND state = ANY(ARRAY['created','retry']::${this.connection.schema}.job_state[])
+         AND state = ANY(ARRAY['created','retry']::text[])
          AND start_after > now()
          AND data = $2::jsonb
        ORDER BY start_after, created_on, id`,
@@ -473,8 +468,8 @@ export class Queue extends EventEmitter {
   async timestamps(): Promise<number[]> {
     const result = await this.connection.query<{ start_after: Date }>(
       `SELECT DISTINCT start_after
-       FROM ${this.connection.schema}.job
-       WHERE state = ANY(ARRAY['created','retry']::${this.connection.schema}.job_state[])
+       FROM ${this.connection.schema}.pgrq_jobs
+       WHERE state = ANY(ARRAY['created','retry']::text[])
          AND start_after > now()
        ORDER BY start_after`,
     );
@@ -497,8 +492,8 @@ export class Queue extends EventEmitter {
     );
     const result = await this.connection.query<JobRow>(
       `SELECT id, name, data, created_on, start_after
-       FROM ${this.connection.schema}.job
-       WHERE state = ANY(ARRAY['created','retry']::${this.connection.schema}.job_state[])
+       FROM ${this.connection.schema}.pgrq_jobs
+       WHERE state = ANY(ARRAY['created','retry']::text[])
          AND start_after > now()
          AND start_after >= to_timestamp($1)
          AND start_after < to_timestamp($1) + interval '1 second'
@@ -651,7 +646,7 @@ export class Queue extends EventEmitter {
   }
 
   /**
-   * Mark the worker's in-flight pg-boss job failed in place.
+   * Mark the worker's in-flight job failed in place.
    *
    * @param working - Worker assignment, including optional job id.
    * @param errorPayload - Resque failure payload stored in `output`.
@@ -664,7 +659,7 @@ export class Queue extends EventEmitter {
     const updated = await this.connection.query(
       `WITH selected AS (
          SELECT name, id
-         FROM ${schema}.job
+         FROM ${schema}.pgrq_jobs
          WHERE name = $1
            AND state = 'active'
            AND (
@@ -675,7 +670,7 @@ export class Queue extends EventEmitter {
          LIMIT 1
          FOR UPDATE
        )
-       UPDATE ${schema}.job AS job
+       UPDATE ${schema}.pgrq_jobs AS job
        SET state = 'failed',
            completed_on = now(),
            output = $3::jsonb
@@ -691,17 +686,18 @@ export class Queue extends EventEmitter {
     if ((updated.rowCount ?? 0) > 0) return;
     if (working.id) return;
 
-    await this.ensureQueue(working.queue);
-    await this.connection.query(
-      `INSERT INTO ${this.connection.schema}.job
-         (name, data, state, retry_limit, completed_on, output)
-       VALUES ($1, $2::jsonb, 'failed', 0, now(), $3::jsonb)`,
-      [
-        working.queue,
-        JSON.stringify(working.payload),
-        JSON.stringify(errorPayload),
-      ],
-    );
+    await this.withQueue(working.queue, async () => {
+      await this.connection.query(
+        `INSERT INTO ${this.connection.schema}.pgrq_jobs
+           (name, data, state, completed_on, output)
+         VALUES ($1, $2::jsonb, 'failed', now(), $3::jsonb)`,
+        [
+          working.queue,
+          JSON.stringify(working.payload),
+          JSON.stringify(errorPayload),
+        ],
+      );
+    });
   }
 
   /**
@@ -725,11 +721,11 @@ export class Queue extends EventEmitter {
     return result;
   }
 
-  /** @returns Number of failed pg-boss jobs. */
+  /** @returns Number of failed jobs. */
   async failedCount(): Promise<number> {
     const result = await this.connection.query<{ count: string }>(
       `SELECT count(*)::text AS count
-       FROM ${this.connection.schema}.job
+       FROM ${this.connection.schema}.pgrq_jobs
        WHERE state = 'failed'`,
     );
     return Number(result.rows[0]?.count ?? 0);
@@ -746,7 +742,7 @@ export class Queue extends EventEmitter {
     const range = sqlRange(start, stop, "$2");
     const result = await this.connection.query<JobRow>(
       `SELECT id, name, data, output, created_on, start_after, completed_on
-       FROM ${this.connection.schema}.job
+       FROM ${this.connection.schema}.pgrq_jobs
        WHERE state = 'failed'
        ORDER BY completed_on, created_on, id
        OFFSET $1
@@ -766,13 +762,13 @@ export class Queue extends EventEmitter {
     const candidates = failedJob.id
       ? await this.connection.query<JobRow>(
           `SELECT id, name, data, output, created_on, start_after, completed_on
-           FROM ${this.connection.schema}.job
+           FROM ${this.connection.schema}.pgrq_jobs
            WHERE id = $1 AND state = 'failed'`,
           [failedJob.id],
         )
       : await this.connection.query<JobRow>(
           `SELECT id, name, data, output, created_on, start_after, completed_on
-           FROM ${this.connection.schema}.job
+           FROM ${this.connection.schema}.pgrq_jobs
            WHERE state = 'failed'
            ORDER BY completed_on, created_on, id`,
         );
@@ -783,7 +779,7 @@ export class Queue extends EventEmitter {
     if (!match) return 0;
 
     const deleted = await this.connection.query(
-      `DELETE FROM ${this.connection.schema}.job
+      `DELETE FROM ${this.connection.schema}.pgrq_jobs
        WHERE id = $1 AND state = 'failed'`,
       [match.id],
     );
@@ -857,41 +853,50 @@ export class Queue extends EventEmitter {
     payload: ParsedJob,
     options: { startAfter?: Date } = {},
   ): Promise<string> {
+    return this.withQueue(q, async () => {
+      const result = await this.connection.query<{ id: string }>(
+        `INSERT INTO ${this.connection.schema}.pgrq_jobs
+           (name, data, start_after)
+         VALUES ($1, $2::jsonb, COALESCE($3::timestamptz, now()))
+         RETURNING id`,
+        [q, JSON.stringify(payload), options.startAfter ?? null],
+      );
+      const id = result.rows[0]?.id;
+      if (!id) throw new Error(`Failed to enqueue job on queue "${q}"`);
+      return id;
+    });
+  }
+
+  /**
+   * Recreate the queue row, then run `work`. Retry once if a concurrent
+   * `delQueue` removed the parent between those statements (FK 23503).
+   *
+   * @param q - Queue name.
+   * @param work - Job-table mutation that requires `pgrq_queues.name`.
+   * @returns Result of `work`.
+   */
+  private async withQueue<T>(q: string, work: () => Promise<T>): Promise<T> {
     let lastError: Error | undefined;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await this.ensureQueue(q);
       try {
-        const id = await this.connection.boss.send(q, payload, {
-          retryLimit: 0,
-          deleteAfterSeconds: 0,
-          ...options,
-        });
-        if (!id) {
-          throw new Error(
-            `pg-boss did not enqueue job "${payload.class}" on queue "${q}"`,
-          );
-        }
-        return id;
+        return await work();
       } catch (error) {
         lastError = toError(error);
-        if (attempt === 0 && isMissingQueue(lastError, q)) continue;
+        if (attempt === 0 && isMissingQueueFk(error)) continue;
         throw lastError;
       }
     }
-    throw lastError ?? new Error(`pg-boss did not enqueue job on queue "${q}"`);
+    throw lastError ?? new Error(`Failed to write job on queue "${q}"`);
   }
 
   private async ensureQueue(q: string): Promise<void> {
-    const existing = await this.connection.boss.getQueue(q);
-    if (existing) return;
-    try {
-      await this.connection.boss.createQueue(q, {
-        retryLimit: 0,
-        deleteAfterSeconds: 0,
-      });
-    } catch (error) {
-      if (!(await this.connection.boss.getQueue(q))) throw error;
-    }
+    await this.connection.query(
+      `INSERT INTO ${this.connection.schema}.pgrq_queues (name)
+       VALUES ($1)
+       ON CONFLICT (name) DO NOTHING`,
+      [q],
+    );
   }
 
   private async acquireDelayedLock(
@@ -1046,8 +1051,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isMissingQueue(error: Error, q: string): boolean {
-  return error.message.includes(`Queue ${q} does not exist`);
+function isMissingQueueFk(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  return error.code === "23503" && error.table === "pgrq_jobs";
 }
 
 function toError(error: unknown): Error {

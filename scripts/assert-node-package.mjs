@@ -14,7 +14,13 @@ assert.equal(
 assert.ok(process.versions.node, "expected a Node.js runtime");
 
 assert.equal(typeof pkg.name, "string");
+assert.equal(pkg.name, "pg-queue");
 assert.equal(typeof pkg.exports?.["."]?.import, "string");
+assert.ok(pkg.files.includes("migrations"));
+assert.match(
+  readFileSync(join(root, "migrations", "001_initial.sql"), "utf8"),
+  /CREATE TABLE IF NOT EXISTS \{\{schema\}\}\.pgrq_jobs/,
+);
 
 const entry = pkg.exports["."].import;
 const url = pathToFileURL(join(root, entry)).href;

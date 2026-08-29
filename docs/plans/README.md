@@ -1,6 +1,6 @@
 # Implementation plans
 
-These documents are the **living** implementation spec for `pgboss-queue`. Execute them in order. Each phase lists **goal**, **why**, **deliverables**, **acceptance criteria**, **what the next phase needs**, and **Lessons learned**.
+These documents are the **living** implementation spec for `pg-queue`. Execute them in order. Each phase lists **goal**, **why**, **deliverables**, **acceptance criteria**, **what the next phase needs**, and **Lessons learned**.
 
 When you implement or change something a phase covers, update that file in the same PR and append to **Lessons learned**. Do not leave plans stale. See `CLAUDE.md` → *Keep the phase plans current*.
 
@@ -32,4 +32,4 @@ Each phase file starts with a status line:
 
 ## Lessons learned
 
-Every phase file ends with an empty `## Lessons learned` section. Fill it as you go: surprises, pg-boss API mismatches, tests we had to adapt, decisions that diverged from the original plan. Newest entry last. Never delete old bullets.
+Every phase file ends with an empty `## Lessons learned` section. Fill it as you go: storage API mismatches, tests we had to adapt, and decisions that diverged from the original plan. Newest entry last. Never delete old bullets.

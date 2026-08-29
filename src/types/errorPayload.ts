@@ -2,7 +2,7 @@ import type { ParsedJob } from "../core/queue.js";
 
 /** Resque-compatible representation of a failed job. */
 export interface ErrorPayload {
-  /** pg-boss job id, when the failure came from the job table. */
+  /** Job id, when the failure came from the job table. */
   id?: string;
   /** Worker that failed the job, or an empty string when unknown. */
   worker: string;

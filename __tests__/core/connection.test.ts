@@ -16,11 +16,17 @@ describe("connection", () => {
     await specHelper.disconnect();
   });
 
+  test("uses PostgreSQL-safe project defaults", () => {
+    const connection = new Connection();
+    expect(connection.schema).toBe("pgqueue");
+    expect(connection.options.application_name).toBe("pg-queue");
+  });
+
   test("should start with no redis keys in the namespace", async () => {
     // Adapt: after cleanup, no job rows and no pgrq_* rows
     const pool = await specHelper.connect();
     const jobCount = await pool.query<{ count: string }>(
-      `SELECT count(*)::text AS count FROM ${specHelper.schema}.job`,
+      `SELECT count(*)::text AS count FROM ${specHelper.schema}.pgrq_jobs`,
     );
     const lockCount = await pool.query<{ count: string }>(
       `SELECT count(*)::text AS count FROM ${specHelper.schema}.pgrq_locks`,
@@ -71,7 +77,7 @@ describe("connection", () => {
     });
 
     test("keys built with a custom namespace are correct", async () => {
-      // Adapt: `schema` option sets pg-boss schema; migrate sees that schema
+      // Adapt: `schema` selects the isolated pg-queue schema
       const customSchema = "custom_namespace_test";
       const custom = new Connection({
         connectionString: process.env.DATABASE_URL,
@@ -137,8 +143,7 @@ describe("connection", () => {
     // Skip: empty schema illegal; we reject
   });
 
-  test("removes the redis event listeners when end", async () => {
-    // Adapt: pool / boss error listeners removed on end()
+  test("removes the postgres event listener when end", async () => {
     const pool = new Pool({ connectionString: process.env.DATABASE_URL });
     const connection = new Connection({
       pool,
@@ -146,11 +151,8 @@ describe("connection", () => {
     });
     await connection.connect();
     expect(pool.listenerCount("error")).toBe(1);
-    expect(connection.boss.listenerCount("error")).toBe(1);
-    const boss = connection.boss;
     await connection.end();
     expect(pool.listenerCount("error")).toBe(0);
-    expect(boss.listenerCount("error")).toBe(0);
     await pool.end();
   });
 
@@ -162,6 +164,21 @@ describe("connection", () => {
       "SELECT 1 AS value",
     );
     expect(result.rows[0]?.value).toBe(1);
+    await connection.end();
+  });
+
+  test("connect is idempotent and supports reconnect after end", async () => {
+    const connection = new Connection(specHelper.cleanConnectionDetails());
+    await Promise.all([connection.connect(), connection.connect()]);
+    expect(connection.connected).toBe(true);
+    expect(connection.pool.listenerCount("error")).toBe(1);
+
+    await connection.end();
+    expect(connection.connected).toBe(false);
+    expect(() => connection.pool).toThrow("Connection is not connected");
+
+    await connection.connect();
+    expect(connection.connected).toBe(true);
     await connection.end();
   });
 
@@ -197,13 +214,16 @@ describe("connection", () => {
   });
 
   test("reject illegal schema", () => {
-    expect(() => new Connection({ schema: "pgboss-queue" })).toThrow(
+    expect(() => new Connection({ schema: "pg-queue" })).toThrow(
       /Invalid schema/,
     );
     expect(() => new Connection({ schema: "public; drop" })).toThrow(
       /Invalid schema/,
     );
     expect(() => new Connection({ schema: "" })).toThrow(/Invalid schema/);
+    expect(() => new Connection({ schema: "pg_queue" })).toThrow(
+      /reserves the "pg_" prefix/,
+    );
   });
 
   test("reject Redis options", () => {
@@ -230,7 +250,7 @@ describe("connection", () => {
     ).toThrow(/database/);
   });
 
-  test("migrate() creates pg-boss job table and pgrq_* tables", async () => {
+  test("migrate() creates all versioned pg-queue tables", async () => {
     const freshSchema = "pgrq_migrate_once";
     const pool = await specHelper.connect();
     await pool.query(`DROP SCHEMA IF EXISTS ${freshSchema} CASCADE`);
@@ -249,16 +269,34 @@ describe("connection", () => {
        ORDER BY table_name`,
       [
         freshSchema,
-        ["job", "pgrq_leader", "pgrq_locks", "pgrq_stats", "pgrq_workers"],
+        [
+          "pgrq_jobs",
+          "pgrq_leader",
+          "pgrq_locks",
+          "pgrq_migrations",
+          "pgrq_queues",
+          "pgrq_stats",
+          "pgrq_workers",
+        ],
       ],
     );
     expect(tables.rows.map((row) => row.table_name)).toEqual([
-      "job",
+      "pgrq_jobs",
       "pgrq_leader",
       "pgrq_locks",
+      "pgrq_migrations",
+      "pgrq_queues",
       "pgrq_stats",
       "pgrq_workers",
     ]);
+
+    const migrations = await connection.query<{
+      version: number;
+      name: string;
+    }>(
+      `SELECT version, name FROM ${freshSchema}.pgrq_migrations ORDER BY version`,
+    );
+    expect(migrations.rows).toEqual([{ version: 1, name: "initial" }]);
 
     await connection.end();
     await pool.query(`DROP SCHEMA IF EXISTS ${freshSchema} CASCADE`);
@@ -269,6 +307,92 @@ describe("connection", () => {
     await connection.connect();
     await connection.migrate();
     await connection.migrate();
+    await connection.end();
+  });
+
+  test("concurrent migrate() calls serialize safely", async () => {
+    const freshSchema = "pgrq_migrate_concurrent";
+    const pool = await specHelper.connect();
+    await pool.query(`DROP SCHEMA IF EXISTS ${freshSchema} CASCADE`);
+    const a = new Connection({
+      connectionString: process.env.DATABASE_URL,
+      schema: freshSchema,
+    });
+    const b = new Connection({
+      connectionString: process.env.DATABASE_URL,
+      schema: freshSchema,
+    });
+
+    await Promise.all([a.migrate(), b.migrate()]);
+    const result = await a.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM ${freshSchema}.pgrq_migrations`,
+    );
+    expect(Number(result.rows[0]?.count)).toBe(1);
+
+    await Promise.all([a.end(), b.end()]);
+    await pool.query(`DROP SCHEMA IF EXISTS ${freshSchema} CASCADE`);
+  });
+
+  test("migrate() can establish its own connection", async () => {
+    const freshSchema = "pgrq_migrate_connect";
+    const pool = await specHelper.connect();
+    await pool.query(`DROP SCHEMA IF EXISTS ${freshSchema} CASCADE`);
+    const connection = new Connection({
+      connectionString: process.env.DATABASE_URL,
+      schema: freshSchema,
+    });
+
+    await connection.migrate();
+    expect(connection.connected).toBe(true);
+    expect(
+      (
+        await connection.query<{ version: number }>(
+          `SELECT version FROM ${freshSchema}.pgrq_migrations`,
+        )
+      ).rows,
+    ).toEqual([{ version: 1 }]);
+
+    await connection.end();
+    await pool.query(`DROP SCHEMA IF EXISTS ${freshSchema} CASCADE`);
+  });
+
+  test("fetchJob atomically claims ready jobs and skips delayed jobs", async () => {
+    await specHelper.cleanup();
+    const connection = new Connection(specHelper.cleanConnectionDetails());
+    await connection.connect();
+    await connection.query(
+      `INSERT INTO ${specHelper.schema}.pgrq_queues (name) VALUES ('claims')`,
+    );
+    await connection.query(
+      `INSERT INTO ${specHelper.schema}.pgrq_jobs
+         (name, data, priority, start_after)
+       VALUES
+         ('claims', '{"value":"low"}', 0, now()),
+         ('claims', '{"value":"high"}', 10, now()),
+         ('claims', '{"value":"later"}', 100, now() + interval '1 hour')`,
+    );
+
+    const [first, second] = await Promise.all([
+      connection.fetchJob<{ value: string }>("claims"),
+      connection.fetchJob<{ value: string }>("claims"),
+    ]);
+    expect(new Set([first?.id, second?.id]).size).toBe(2);
+    expect([first?.data.value, second?.data.value].sort()).toEqual([
+      "high",
+      "low",
+    ]);
+    expect(await connection.fetchJob("claims")).toBeNull();
+
+    const states = await connection.query<{ state: string; count: string }>(
+      `SELECT state, count(*)::text AS count
+       FROM ${specHelper.schema}.pgrq_jobs
+       GROUP BY state
+       ORDER BY state`,
+    );
+    expect(states.rows).toEqual([
+      { state: "active", count: "2" },
+      { state: "created", count: "1" },
+    ]);
     await connection.end();
   });
 

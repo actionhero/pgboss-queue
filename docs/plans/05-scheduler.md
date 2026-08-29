@@ -50,7 +50,7 @@ Non-leaders skip 1, 3–5.
 
 ### Delayed jobs
 
-pg-boss already hides future `start_after` from `fetch`. Workers will pick them up without a transfer. For **API and event compatibility**:
+`Connection.fetchJob()` hides future `start_after` values. Workers pick jobs up without a transfer. For **API and event compatibility**:
 
 On leader poll, select delayed jobs with `start_after <= now()` that have not yet been "announced" **or** simply:
 
@@ -107,7 +107,7 @@ WHERE state IN ('completed', 'cancelled')
 RETURNING id
 ```
 
-Use pg-boss `deleteJob` if that is required for partition integrity; otherwise SQL delete is what keryx used for management.
+Delete retained rows directly from `pgrq_jobs`; there is no second maintenance system.
 
 - Default retention 24h
 - Do **not** delete `failed` or `active` or `created`
@@ -161,4 +161,4 @@ Stable leader + worker cleaning. Plugins can land in parallel with leftover sche
 
 ## Lessons learned
 
-_None yet._
+- 2026-08-29: Scheduler migration and retention now operate solely on the owned migration ledger and `pgrq_jobs`; there is no pg-boss supervisor or partition lifecycle to coordinate with.

@@ -27,7 +27,7 @@ If a row above is missing when you start this phase, that is a **bug in an earli
 
 ## Tooling (already specified in Phase 1; complete here if gaps remain)
 
-| node-resque | pgboss-queue |
+| node-resque | pg-queue |
 | --- | --- |
 | Jest + ts-jest | `bun:test` (`bun test --max-concurrency=1`) |
 | `ioredis` specHelper | `__tests__/utils/specHelper.ts` |
@@ -65,7 +65,7 @@ Use this table as a **checklist in this phase's PR**: tick what is already green
 | getKeys returns appropriate keys | **Skip** | Redis SCAN |
 | keys built with the default namespace | **Skip** | Redis key prefix |
 | ioredis transparent key prefix… | **Skip** | |
-| keys built with a custom namespace | **Adapt** ✅ Phase 2 | `schema` option sets pg-boss schema; `migrate` sees that schema |
+| keys built with a custom namespace | **Adapt** ✅ Phase 2 | `schema` selects the owned queue schema; `migrate` sees that schema |
 | keys built with a array namespace | **Skip** | array namespace not supported |
 | will properly build namespace strings dynamically | **Skip** | |
 | will select redis db from options | **Adapt** ✅ Phase 2 | `database` string selects Postgres database via discrete ConnectionOptions |
@@ -126,7 +126,7 @@ Adapt any `specHelper.redis.rpop(namespace+":failed")` to `queue.failed(0,-1)`.
 
 ### `__tests__/integration/ioredis-mock.ts`
 
-**Skip**. No in-memory pg-boss mock required for v1.
+**Skip**. No in-memory PostgreSQL queue mock is required for v1.
 
 ### `__tests__/utils/*`
 
@@ -151,7 +151,7 @@ If an assertion cannot be identical, add a row (may already have rows from earli
 | --- | --- | --- | --- |
 | keys built with a custom namespace | `connection.key("thing") === "customNamespace:thing"` | `connection.schema === customSchema` and `pgrq_locks` exists in that schema | Keys are not Redis-prefixed; schema replaces namespace |
 | removes the redis event listeners when end | `redis.listenerCount("error"|"end")` | `pool`/`boss` `listenerCount("error")` with BYO pool | No Redis `end` event; we forward `error` only |
-| queue delayed-job tests using timestamp `10000` | Redis keeps the 1970 timestamp in a delayed list until Scheduler transfers it | Use a future rounded timestamp and assert the same seconds/ms conversions | pg-boss `startAfter` is eligibility time, so a past timestamp is immediately ready by design |
+| queue delayed-job tests using timestamp `10000` | Redis keeps the 1970 timestamp in a delayed list until Scheduler transfers it | Use a future rounded timestamp and assert the same seconds/ms conversions | `start_after` is eligibility time, so a past timestamp is immediately ready by design |
 
 PRs that add rows must explain. "Postgres is different" is not enough if the Queue API can still match.
 
@@ -179,3 +179,4 @@ Docs site can describe a real API. Phase 10 can trust tests that have been runni
 - 2026-08-26: Phase 2 — Bun requires `.test.ts` (or `.spec` / `_test_` / `_spec_`) in the filename. Matrix paths are `__tests__/core/<name>.test.ts` while describe/test titles stay node-resque-identical. Later phases must not copy bare `connection.ts`-style names or CI will skip them.
 - 2026-08-29: Phase 3 preserves upstream Queue test titles but replaces hard-coded 1970 delayed timestamps with future rounded values. This is a required semantic adaptation because pg-boss uses `startAfter` directly rather than waiting for a scheduler to move a Redis-list item.
 - 2026-08-29: Phase 3's Queue suite now covers active/old worker metadata, force-clean, and retry-stuck behavior through seeded pg-boss and `pgrq_workers` rows. Phase 4 still repeats these paths with a live Worker but no Queue titles remain skipped.
+- 2026-08-29: The Phase 2/3 PostgreSQL adaptations now target the owned `pgrq_*` schema and `Connection.fetchJob()` rather than pg-boss internals; test titles and externally visible assertions remain unchanged.

@@ -48,10 +48,11 @@ Port `examples/multiWorker.ts` to Postgres connection details.
 
 ## Note
 
-pg-boss `localConcurrency` is **not** a substitute. MultiWorker must spawn real `Worker` objects so plugins, names, and heartbeats stay per-worker.
+MultiWorker must spawn real `Worker` objects so plugins, names, and heartbeats stay per-worker.
 
 ## Lessons learned
 
 - 2026-08-26: Phase 1 runs tests with `node:test`, not `bun:test`. Do not assume Bun-only retry APIs when this phase is implemented.
 - 2026-08-26: Phase 1 reverted to `bun:test`. Bun retry APIs are available again; Node is only the compiled-package import check.
+- 2026-08-29: Removing pg-boss does not change MultiWorker semantics; concurrency remains a pool of real resque-compatible Worker instances.
 

@@ -45,7 +45,7 @@ From keryx `docs/.vitepress/config.mts` / `docs.yaml`:
 - `appearance: "dark"`
 - `lastUpdated: true`
 - local search
-- `editLink` → `https://github.com/actionhero/pgboss-queue/edit/main/docs/:path`
+- `editLink` → `https://github.com/actionhero/pg-queue/edit/main/docs/:path`
 - nav: Guide, Reference, Changelog, GitHub, version from `package.json`
 - sidebar grouped by task (getting started → concepts → operations), not by folder internals
 - `vitepress-plugin-llms` + per-page `.md` alternate links (keryx does this; do it unless it slows us down — then defer, do not block)
@@ -115,7 +115,7 @@ Prefer (1) for the small public surface, with a checklist: every public method h
 
 Permissions: `pages: write`, `id-token: write`.
 
-Custom domain optional (`CNAME`); default `https://actionhero.github.io/pgboss-queue/` until DNS exists.
+Custom domain optional (`CNAME`); default `https://actionhero.github.io/pg-queue/` until DNS exists.
 
 ## Tests
 
@@ -138,4 +138,4 @@ Phase 10 adds Pages deploy (if not already in `docs.yaml`) and npm publish. Test
 
 ## Lessons learned
 
-_None yet._
+- 2026-08-29: Product naming and examples must use `pg-queue`; migration documentation must describe the owned `pgrq_*` schema rather than pg-boss.

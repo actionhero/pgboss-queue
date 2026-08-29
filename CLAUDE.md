@@ -4,7 +4,7 @@ Guidance for Claude Code and other agents working in this repository.
 
 ## Project
 
-`pgboss-queue` is a TypeScript background-job library. The public API is the node-resque trio — `Queue`, `Worker`, `Scheduler` — plus `MultiWorker` and `Plugins`. Storage is PostgreSQL via [pg-boss](https://github.com/timgit/pg-boss), not Redis.
+`pg-queue` is a TypeScript background-job library. The public API is the node-resque trio — `Queue`, `Worker`, `Scheduler` — plus `MultiWorker` and `Plugins`. Storage is PostgreSQL through our versioned `pgrq_*` schema, not Redis.
 
 This is an Actionhero project (sibling of [node-resque](https://github.com/actionhero/node-resque) and [keryx](https://github.com/actionhero/keryx)). It exists so Keryx and other apps can keep the resque worker/scheduler pattern without a Redis dependency for jobs.
 
@@ -60,17 +60,17 @@ bun docs:dev                # VitePress (Phase 9)
 Local Postgres: set `DATABASE_URL` (see `.env.example`). CI starts Postgres as a workflow service; there is no `docker-compose.yml`.
 
 ```bash
-# DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgboss_queue_test
+# DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgqueue_test
 ```
 
 Tests create and tear down the configured schema per file (see `specHelper`). Never point tests at a production database.
 
 ## Architecture (do not violate)
 
-1. **node-resque is the runtime model.** Classes, events, plugin hooks, worker names (`hostname:pid[+id]`), queue priority (array order), leader-elected scheduler. Port behavior; do not "simplify" it into pg-boss's `work()` helper.
-2. **pg-boss is the job store.** Jobs live in pg-boss's `job` table. Dequeue with `fetch` + `SKIP LOCKED` (or equivalent SQL), not `LPOP`. Delayed jobs use `startAfter`. Do not reimplement a job table next to pg-boss.
-3. **We own metadata pg-boss does not.** Workers, heartbeats, leader lock, plugin locks, and processed/failed counters live in *our* tables in the same schema (or a documented adjacent schema). See Phase 2.
-4. **The elected scheduler is the only migrator and sweeper.** `automigrate` and completed-job deletion run on the leader, never on every worker. Workers start pg-boss with `migrate: false` and `supervise: false`.
+1. **node-resque is the runtime model.** Classes, events, plugin hooks, worker names (`hostname:pid[+id]`), queue priority (array order), leader-elected scheduler. Port behavior rather than replacing it with a generic handler API.
+2. **We own the job store.** Jobs live in `pgrq_jobs`; queue names live in `pgrq_queues`. Dequeue atomically with `FOR UPDATE SKIP LOCKED`, not `LPOP`. Delayed jobs use `start_after`.
+3. **We own metadata.** Workers, heartbeats, leader lock, plugin locks, and processed/failed counters live in `pgrq_*` tables in the same schema. See Phase 2.
+4. **The elected scheduler is the only migrator and sweeper.** `automigrate` and completed-job deletion run on the leader, never on every worker.
 5. **Keryx PR #519 is research, not a copy target.** Steal: connection strings, schema isolation, SQL introspection on `job`, `short` policy for singleton pending jobs, `deleteAfterSeconds` thinking. Do not steal: dropping worker heartbeats, dropping plugins, replacing `Worker` with a single `boss.work` handler, removing the scheduler.
 
 ## Public API
@@ -111,8 +111,8 @@ type ConnectionOptions = {
   user?: string;
   password?: string;
   ssl?: boolean | object;
-  pool?: import("pg").Pool;           // bring-your-own (maps to pg-boss `db`)
-  schema?: string;                    // default "pgboss_queue" (was Redis namespace)
+  pool?: import("pg").Pool;           // bring-your-own pool
+  schema?: string;                    // default "pgqueue" (was Redis namespace)
 };
 
 type SchedulerOptions = ConnectionOptions & {
@@ -137,7 +137,7 @@ Do **not** accept `pkg: "ioredis"`, `redis: Redis`, or `database: number`. Those
 - **Biome** for format/lint (keryx-style), not Prettier.
 - **Tests use `bun:test`**, not Jest. Port node-resque tests faithfully: same `describe` / `test` names, same assertions, Postgres `specHelper` instead of Redis. Node must still be able to import the compiled package (`node scripts/assert-node-package.mjs`); do not run the Bun suite on Node.
 - **Every behavior change ships with tests.** A PR with no test changes is a red flag unless it is docs-only.
-- **Do not add dependencies** unless a phase plan names them. Expected runtime deps: `pg-boss`, `pg`. Dev: `typescript`, `@types/pg`, `biome`, `bun` types.
+- **Do not add dependencies** unless a phase plan names them. Expected runtime dependency: `pg`. Dev: `typescript`, `@types/pg`, `biome`, `bun` types.
 
 ## Testing rules
 
@@ -183,4 +183,3 @@ Follow keryx: bump `version` in `package.json` on every user-facing PR (patch fo
 - node-resque README + `src/core/*` + `__tests__/*` — source of truth for behavior
 - node-resque examples (`example.ts`, `multiWorker.ts`, `scheduledJobs.ts`, `retry.ts`, `stuckWorker.ts`, `cluster.ts`)
 - [keryx#519](https://github.com/actionhero/keryx/pull/519) — `PgBossBackend.ts`, `TaskBackend.ts`, `config/tasks.ts`
-- pg-boss docs — constructor options (`connectionString`, `schema`, `migrate`, `supervise`, `schedule`), `send` / `fetch` / `complete` / `fail`, `startAfter`, `deleteAfterSeconds`
