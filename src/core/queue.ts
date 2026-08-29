@@ -857,9 +857,9 @@ export class Queue extends EventEmitter {
       const result = await this.connection.query<{ id: string }>(
         `INSERT INTO ${this.connection.schema}.pgrq_jobs
            (name, data, start_after)
-         VALUES ($1, $2::jsonb, $3)
+         VALUES ($1, $2::jsonb, COALESCE($3::timestamptz, now()))
          RETURNING id`,
-        [q, JSON.stringify(payload), options.startAfter ?? new Date()],
+        [q, JSON.stringify(payload), options.startAfter ?? null],
       );
       const id = result.rows[0]?.id;
       if (!id) throw new Error(`Failed to enqueue job on queue "${q}"`);

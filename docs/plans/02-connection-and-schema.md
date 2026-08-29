@@ -249,4 +249,5 @@ Do not defer these to Phase 8.
 - 2026-08-29: Removed pg-boss after Phase 3 confirmed that its lifecycle and schema added coupling without supplying the resque runtime. Migrations now ship as numbered SQL files, execute under an advisory lock in one transaction, and are included in the npm package.
 - 2026-08-29: `connect()` must execute `SELECT 1`; constructing `pg.Pool` is lazy and does not prove credentials, routing, or database availability.
 - 2026-08-29: PostgreSQL reserves schema names beginning with `pg_`, so the renamed project cannot default to `pg_queue`. The default is `pgqueue`, and validation rejects the reserved prefix before migration.
+- 2026-08-29: Bugbot: `migrate()` now calls `connect()`, so a failed bootstrap `SELECT 1` tears down the owned pool and error listener instead of leaking them with `connected === false`. `connect()` tears down before emitting `error` so a missing listener cannot skip cleanup.
 - 2026-08-29: Phase 3 restored node-resque's optional `QueueOptions.queue` field. Queue methods still take an explicit queue name, but retaining the constructor field lets existing typed call sites migrate without an excess-property error.

@@ -85,6 +85,15 @@ describe("queue", () => {
       expect(await queue.enqueue(specHelper.queue, "someJob", [1, 2, 3])).toBe(
         true,
       );
+      const timing = await queue.connection.query<{ skew_ms: string }>(
+        `SELECT (extract(epoch from (start_after - now())) * 1000)::text AS skew_ms
+         FROM ${specHelper.schema}.pgrq_jobs
+         WHERE name = $1`,
+        [specHelper.queue],
+      );
+      expect(Math.abs(Number(timing.rows[0]?.skew_ms ?? 9999))).toBeLessThan(
+        1000,
+      );
       const raw = await specHelper.popFromQueue();
       expect(raw).not.toBeNull();
       const job = JSON.parse(raw ?? "{}") as ParsedJob;

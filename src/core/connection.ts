@@ -188,8 +188,8 @@ export class Connection extends EventEmitter {
       this.connected = true;
     } catch (error) {
       const err = toError(error);
-      this.emit("error", err);
       await this.teardownPartialConnect();
+      this.emit("error", err);
       throw err;
     }
   }
@@ -292,11 +292,7 @@ export class Connection extends EventEmitter {
    * @throws If the pool cannot be opened or migration SQL fails.
    */
   async migrate(): Promise<void> {
-    if (!this._pool) {
-      this.ensurePool();
-      await this.pool.query("SELECT 1");
-      this.connected = true;
-    }
+    await this.connect();
 
     const schema = this._schema;
     const client = await this.pool.connect();

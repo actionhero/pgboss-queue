@@ -40,4 +40,24 @@ describe("connection error", () => {
         });
     });
   }, 60_000);
+
+  test("migrate() tears down a failed bootstrap pool", async () => {
+    const brokenConnection = new Connection({
+      host: "127.0.0.1",
+      port: 1,
+      database: "pgqueue_test",
+      user: "postgres",
+      password: "postgres",
+      schema: "pgqueue_test",
+    });
+    brokenConnection.on("error", () => {
+      // connect() also emits; the rejection is the assertion
+    });
+
+    await expect(brokenConnection.migrate()).rejects.toThrow(
+      /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|connect/i,
+    );
+    expect(brokenConnection.connected).toBe(false);
+    expect(() => brokenConnection.pool).toThrow("Connection is not connected");
+  }, 60_000);
 });
