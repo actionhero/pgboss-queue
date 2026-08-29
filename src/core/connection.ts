@@ -59,6 +59,8 @@ export interface ConnectionOptions {
  */
 export interface QueueOptions {
   connection?: ConnectionOptions;
+  /** Optional default queue retained for node-resque constructor compatibility. */
+  queue?: string | string[];
 }
 
 /**

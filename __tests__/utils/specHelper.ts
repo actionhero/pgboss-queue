@@ -120,10 +120,26 @@ export async function dropSchema(): Promise<void> {
 }
 
 /**
- * @throws Always — dequeue lands in Phase 3.
+ * Fetch and remove one ready job from the default test queue.
+ *
+ * @returns The node-resque encoded payload, or `null` when the queue is empty.
  */
-export async function popFromQueue(): Promise<never> {
-  throw new Error("not implemented");
+export async function popFromQueue(): Promise<string | null> {
+  const connection = new Connection(cleanConnectionDetails());
+  await connection.connect();
+  try {
+    const jobs = await connection.boss.fetch<{
+      class: string;
+      queue: string;
+      args: unknown[];
+    }>(queue, { batchSize: 1 });
+    const job = jobs[0];
+    if (!job) return null;
+    await connection.boss.deleteJob(queue, job.id);
+    return JSON.stringify(job.data);
+  } finally {
+    await connection.end();
+  }
 }
 
 const specHelper = {

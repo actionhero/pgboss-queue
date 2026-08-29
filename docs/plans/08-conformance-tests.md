@@ -17,8 +17,8 @@ Source of truth: [actionhero/node-resque](https://github.com/actionhero/node-res
 | --- | --- |
 | Phase 1 | `specHelper` skeleton, smoke `SELECT 1`, `test.yaml` (lint / build / Postgres / complete) |
 | Phase 2 | `__tests__/core/connection.test.ts` + `connectionError.test.ts` (+ illegal schema, BYO pool, migrate, locks, leader) |
-| Phase 3 | `__tests__/core/queue.test.ts` (minus live-worker slices deferred to 4) |
-| Phase 4 | `__tests__/core/worker.test.ts`, remaining queue worker-status, multi-process + priority extras |
+| Phase 3 | `__tests__/core/queue.test.ts` (worker-table behavior seeded directly) |
+| Phase 4 | `__tests__/core/worker.test.ts`, live-Worker queue-status integration, multi-process + priority extras |
 | Phase 5 | `__tests__/core/scheduler.test.ts`, automigrate + sweeper extras |
 | Phase 6 | `__tests__/plugins/*.test.ts` |
 | Phase 7 | `__tests__/core/multiWorker.test.ts` |
@@ -151,6 +151,7 @@ If an assertion cannot be identical, add a row (may already have rows from earli
 | --- | --- | --- | --- |
 | keys built with a custom namespace | `connection.key("thing") === "customNamespace:thing"` | `connection.schema === customSchema` and `pgrq_locks` exists in that schema | Keys are not Redis-prefixed; schema replaces namespace |
 | removes the redis event listeners when end | `redis.listenerCount("error"|"end")` | `pool`/`boss` `listenerCount("error")` with BYO pool | No Redis `end` event; we forward `error` only |
+| queue delayed-job tests using timestamp `10000` | Redis keeps the 1970 timestamp in a delayed list until Scheduler transfers it | Use a future rounded timestamp and assert the same seconds/ms conversions | pg-boss `startAfter` is eligibility time, so a past timestamp is immediately ready by design |
 
 PRs that add rows must explain. "Postgres is different" is not enough if the Queue API can still match.
 
@@ -176,3 +177,5 @@ Docs site can describe a real API. Phase 10 can trust tests that have been runni
 - 2026-08-26: Phase 1 corrected the runner to `node:test` on a Bun + Node matrix. Isolation uses `--max-concurrency=1` / `--test-concurrency=1`, not `bun test --concurrency=1`.
 - 2026-08-26: Phase 1 reverted the suite to `bun:test`. Node is covered by importing `dist/` (`test:node-package`), not by running this matrix on `node --test`.
 - 2026-08-26: Phase 2 — Bun requires `.test.ts` (or `.spec` / `_test_` / `_spec_`) in the filename. Matrix paths are `__tests__/core/<name>.test.ts` while describe/test titles stay node-resque-identical. Later phases must not copy bare `connection.ts`-style names or CI will skip them.
+- 2026-08-29: Phase 3 preserves upstream Queue test titles but replaces hard-coded 1970 delayed timestamps with future rounded values. This is a required semantic adaptation because pg-boss uses `startAfter` directly rather than waiting for a scheduler to move a Redis-list item.
+- 2026-08-29: Phase 3's Queue suite now covers active/old worker metadata, force-clean, and retry-stuck behavior through seeded pg-boss and `pgrq_workers` rows. Phase 4 still repeats these paths with a live Worker but no Queue titles remain skipped.
