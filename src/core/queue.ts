@@ -927,8 +927,26 @@ function parseFiniteNumber(value: number | string, name: string): number {
 }
 
 function delayedLockKey(encoded: string, second: number): string {
-  const digest = createHash("sha256").update(encoded).digest("hex");
+  const digest = createHash("sha256")
+    .update(stableJson(JSON.parse(encoded)))
+    .digest("hex");
   return `timestamps:${digest}:delayed:${second}`;
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(sortUnknown(value));
+}
+
+function sortUnknown(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortUnknown);
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, sortUnknown(value[key])]),
+    );
+  }
+  return value;
 }
 
 function parseJob(value: unknown, fallbackQueue: string): ParsedJob {

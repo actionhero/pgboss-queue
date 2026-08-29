@@ -203,6 +203,16 @@ describe("queue", () => {
       expect(await queue.allDelayed()).toEqual({});
     });
 
+    test("can re-schedule after delQueue of object args", async () => {
+      const timestamp = delayedBase();
+      const args = [{ z: 1, a: 2 }];
+      await queue.enqueueAt(timestamp, "object-queue", "someJob", args);
+      expect(await queue.delQueue("object-queue")).toBe(1);
+      expect(
+        await queue.enqueueAt(timestamp, "object-queue", "someJob", args),
+      ).toBe(true);
+    });
+
     test("can handle single arguments without explicit array", async () => {
       await queue.enqueue(specHelper.queue, "someJob", 1);
       const job = JSON.parse(

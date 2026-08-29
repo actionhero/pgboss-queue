@@ -141,3 +141,4 @@ Recommended split:
 - 2026-08-29: Bugbot: the data-only fallback could fail every identical `active` payload. The update now selects a single matching row (`LIMIT 1 … FOR UPDATE`).
 - 2026-08-29: Bugbot: `delayedAt` omitted `start_after > now()`, so a timestamp whose second had arrived still listed jobs that `length`/`queued` already treated as ready. It now uses the same delayed filter as `timestamps` / `scheduledAt` / `delDelayed`.
 - 2026-08-29: Bugbot: delayed duplicate lock keys embedded the encoded JSON and overflowed the `pgrq_locks` btree for large payloads. Keys now use `sha256(encoded)` plus the timestamp second.
+- 2026-08-29: Bugbot: `delQueue` rebuilt those keys from jsonb-loaded args, whose object key order can differ from `JSON.stringify` at enqueue time. The hash now canonicalizes nested object keys so delete and re-enqueue agree.
