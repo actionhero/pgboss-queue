@@ -549,6 +549,41 @@ describe("queue", () => {
       await other.end();
     });
 
+    test("retries enqueue when the queue row is deleted between ensure and insert", async () => {
+      const originalQuery = queue.connection.query.bind(queue.connection);
+      let sabotaged = false;
+      queue.connection.query = (async (
+        text: string,
+        values: unknown[] = [],
+      ) => {
+        if (
+          !sabotaged &&
+          text.includes("INSERT INTO") &&
+          text.includes("pgrq_jobs") &&
+          values[0] === "racy"
+        ) {
+          sabotaged = true;
+          await originalQuery(
+            `DELETE FROM ${specHelper.schema}.pgrq_jobs WHERE name = $1`,
+            ["racy"],
+          );
+          await originalQuery(
+            `DELETE FROM ${specHelper.schema}.pgrq_queues WHERE name = $1`,
+            ["racy"],
+          );
+        }
+        return originalQuery(text, values);
+      }) as typeof queue.connection.query;
+
+      try {
+        expect(await queue.enqueue("racy", "job", [1])).toBe(true);
+        expect(await queue.length("racy")).toBe(1);
+        expect(sabotaged).toBe(true);
+      } finally {
+        queue.connection.query = originalQuery;
+      }
+    });
+
     test("queue row locking serializes enqueue with queue deletion", async () => {
       const other = new Queue({
         connection: specHelper.cleanConnectionDetails(),

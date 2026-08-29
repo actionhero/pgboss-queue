@@ -686,17 +686,18 @@ export class Queue extends EventEmitter {
     if ((updated.rowCount ?? 0) > 0) return;
     if (working.id) return;
 
-    await this.ensureQueue(working.queue);
-    await this.connection.query(
-      `INSERT INTO ${this.connection.schema}.pgrq_jobs
-         (name, data, state, completed_on, output)
-       VALUES ($1, $2::jsonb, 'failed', now(), $3::jsonb)`,
-      [
-        working.queue,
-        JSON.stringify(working.payload),
-        JSON.stringify(errorPayload),
-      ],
-    );
+    await this.withQueue(working.queue, async () => {
+      await this.connection.query(
+        `INSERT INTO ${this.connection.schema}.pgrq_jobs
+           (name, data, state, completed_on, output)
+         VALUES ($1, $2::jsonb, 'failed', now(), $3::jsonb)`,
+        [
+          working.queue,
+          JSON.stringify(working.payload),
+          JSON.stringify(errorPayload),
+        ],
+      );
+    });
   }
 
   /**
@@ -852,17 +853,41 @@ export class Queue extends EventEmitter {
     payload: ParsedJob,
     options: { startAfter?: Date } = {},
   ): Promise<string> {
-    await this.ensureQueue(q);
-    const result = await this.connection.query<{ id: string }>(
-      `INSERT INTO ${this.connection.schema}.pgrq_jobs
-         (name, data, start_after)
-       VALUES ($1, $2::jsonb, $3)
-       RETURNING id`,
-      [q, JSON.stringify(payload), options.startAfter ?? new Date()],
-    );
-    const id = result.rows[0]?.id;
-    if (!id) throw new Error(`Failed to enqueue job on queue "${q}"`);
-    return id;
+    return this.withQueue(q, async () => {
+      const result = await this.connection.query<{ id: string }>(
+        `INSERT INTO ${this.connection.schema}.pgrq_jobs
+           (name, data, start_after)
+         VALUES ($1, $2::jsonb, $3)
+         RETURNING id`,
+        [q, JSON.stringify(payload), options.startAfter ?? new Date()],
+      );
+      const id = result.rows[0]?.id;
+      if (!id) throw new Error(`Failed to enqueue job on queue "${q}"`);
+      return id;
+    });
+  }
+
+  /**
+   * Recreate the queue row, then run `work`. Retry once if a concurrent
+   * `delQueue` removed the parent between those statements (FK 23503).
+   *
+   * @param q - Queue name.
+   * @param work - Job-table mutation that requires `pgrq_queues.name`.
+   * @returns Result of `work`.
+   */
+  private async withQueue<T>(q: string, work: () => Promise<T>): Promise<T> {
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await this.ensureQueue(q);
+      try {
+        return await work();
+      } catch (error) {
+        lastError = toError(error);
+        if (attempt === 0 && isMissingQueueFk(error)) continue;
+        throw lastError;
+      }
+    }
+    throw lastError ?? new Error(`Failed to write job on queue "${q}"`);
   }
 
   private async ensureQueue(q: string): Promise<void> {
@@ -1024,4 +1049,13 @@ function sqlRange(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isMissingQueueFk(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  return error.code === "23503" && error.table === "pgrq_jobs";
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
