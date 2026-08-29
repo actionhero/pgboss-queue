@@ -17,6 +17,38 @@ import specHelper from "../utils/specHelper.js";
 let queue: Queue;
 const delayedBase = () => Math.round((Date.now() + 60_000) / 1000) * 1000;
 
+async function seedActiveWorker(
+  target: Queue,
+  worker: string,
+  queueName: string,
+  args: unknown[],
+  runAt: Date,
+  includeId = true,
+): Promise<string> {
+  await target.enqueue(queueName, "slowJob", args);
+  const jobs = await target.connection.boss.fetch<ParsedJob>(queueName, {
+    batchSize: 1,
+  });
+  const job = jobs[0];
+  if (!job) throw new Error("expected an active job");
+  await target.connection.query(
+    `INSERT INTO ${specHelper.schema}.pgrq_workers (name, queues, working_on)
+     VALUES ($1, $2, $3::jsonb)`,
+    [
+      worker,
+      queueName,
+      JSON.stringify({
+        ...(includeId ? { id: job.id } : {}),
+        run_at: runAt.toString(),
+        queue: queueName,
+        worker,
+        payload: job.data,
+      }),
+    ],
+  );
+  return job.id;
+}
+
 describe("queue", () => {
   beforeAll(async () => {
     await specHelper.connect();
@@ -92,6 +124,26 @@ describe("queue", () => {
         "Job already enqueued at this time with same arguments",
       );
       expect((await queue.delayedAt(timestamp)).tasks).toHaveLength(1);
+    });
+
+    test("concurrent Queue instances only enqueue one matching delayed job", async () => {
+      const other = new Queue({
+        connection: specHelper.cleanConnectionDetails(),
+      });
+      await other.connect();
+      const timestamp = delayedBase();
+      const settled = await Promise.allSettled([
+        queue.enqueueAt(timestamp, specHelper.queue, "someJob", [{ id: 1 }]),
+        other.enqueueAt(timestamp, specHelper.queue, "someJob", [{ id: 1 }]),
+      ]);
+      expect(
+        settled.filter((result) => result.status === "fulfilled"),
+      ).toHaveLength(1);
+      expect(
+        settled.filter((result) => result.status === "rejected"),
+      ).toHaveLength(1);
+      expect((await queue.delayedAt(timestamp)).tasks).toHaveLength(1);
+      await other.end();
     });
 
     test("can schedule a delayed job whose payload exceeds a btree key", async () => {
@@ -176,12 +228,52 @@ describe("queue", () => {
       expect(await queue.length(specHelper.queue)).toBe(0);
     });
 
+    test("del honors positive and negative count direction", async () => {
+      const ids = async () => {
+        const result = await queue.connection.query<{ id: string }>(
+          `SELECT id
+           FROM ${specHelper.schema}.job
+           WHERE name = $1 AND state = 'created'
+           ORDER BY created_on, id`,
+          [specHelper.queue],
+        );
+        return result.rows.map((row) => row.id);
+      };
+
+      for (let index = 0; index < 3; index += 1) {
+        await queue.enqueue(specHelper.queue, "sameJob", [1]);
+      }
+      const original = await ids();
+      expect(await queue.del(specHelper.queue, "sameJob", [1], 1)).toBe(1);
+      expect(await ids()).toEqual(original.slice(1));
+
+      await specHelper.cleanup();
+      for (let index = 0; index < 3; index += 1) {
+        await queue.enqueue(specHelper.queue, "sameJob", [1]);
+      }
+      const reloaded = await ids();
+      expect(await queue.del(specHelper.queue, "sameJob", [1], -1)).toBe(1);
+      expect(await ids()).toEqual(reloaded.slice(0, -1));
+    });
+
     test("can delete all enqueued jobs of a particular function/class", async () => {
       await queue.enqueue(specHelper.queue, "someJob1", [1]);
       await queue.enqueue(specHelper.queue, "someJob1", [2]);
       await queue.enqueue(specHelper.queue, "someJob2", [3]);
       expect(await queue.delByFunction(specHelper.queue, "someJob1")).toBe(2);
       expect(await queue.length(specHelper.queue)).toBe(1);
+    });
+
+    test("delByFunction only deletes matches inside its slice", async () => {
+      await queue.enqueue(specHelper.queue, "someJob1", [1]);
+      await queue.enqueue(specHelper.queue, "someJob2", [2]);
+      await queue.enqueue(specHelper.queue, "someJob1", [3]);
+      expect(
+        await queue.delByFunction(specHelper.queue, "someJob1", 1, 2),
+      ).toBe(1);
+      expect(
+        (await queue.queued(specHelper.queue, 0, -1)).map((job) => job.class),
+      ).toEqual(["someJob1", "someJob2"]);
     });
 
     test("can delete a delayed job", async () => {
@@ -288,6 +380,19 @@ describe("queue", () => {
         expect(
           await queue.delLock("workerslock:lists:queueName:jobName:[{}]"),
         ).toBe(1);
+      });
+
+      test("does not return expired locks", async () => {
+        await queue.connection.query(
+          `UPDATE ${specHelper.schema}.pgrq_locks
+           SET expires_at = now() - interval '1 second'`,
+        );
+        expect(await queue.locks()).toEqual({});
+        const count = await queue.connection.query<{ count: string }>(
+          `SELECT count(*)::text AS count
+           FROM ${specHelper.schema}.pgrq_locks`,
+        );
+        expect(Number(count.rows[0]?.count)).toBe(0);
       });
     });
 
@@ -447,6 +552,36 @@ describe("queue", () => {
       await other.end();
     });
 
+    test("queue row locking serializes enqueue with queue deletion", async () => {
+      const other = new Queue({
+        connection: specHelper.cleanConnectionDetails(),
+      });
+      await other.connect();
+      await queue.enqueue("serialized", "job", [1]);
+      const client = await queue.connection.pool.connect();
+      await client.query("BEGIN");
+      await client.query(
+        `SELECT name
+         FROM ${specHelper.schema}.queue
+         WHERE name = 'serialized'
+         FOR UPDATE`,
+      );
+
+      let settled = false;
+      const enqueue = other.enqueue("serialized", "job", [2]).then((value) => {
+        settled = true;
+        return value;
+      });
+      await Bun.sleep(25);
+      expect(settled).toBe(false);
+      await client.query("COMMIT");
+      client.release();
+
+      expect(await enqueue).toBe(true);
+      expect(await queue.length("serialized")).toBe(2);
+      await other.end();
+    });
+
     test("does not drop jobs that remain after delQueue", async () => {
       await queue.enqueue("busy", "job", [1]);
       await queue.connection.query(
@@ -556,28 +691,98 @@ describe("queue", () => {
       expect(await queue.workingOn("workerA", specHelper.queue)).toBeNull();
     });
 
-    test.skip("we can see what workers are working on (active)", () => {
-      // Phase 4: requires a live Worker.
+    test("we can see what workers are working on (active)", async () => {
+      const runAt = new Date();
+      await seedActiveWorker(
+        queue,
+        "workerA",
+        "active-status",
+        [{ a: 1 }],
+        runAt,
+      );
+      const working = await queue.allWorkingOn();
+      expect(working.workerA).not.toBe("started");
+      if (working.workerA === "started" || !working.workerA) {
+        throw new Error("expected active worker payload");
+      }
+      expect(working.workerA.payload.args).toEqual([{ a: 1 }]);
+      expect(Date.parse(working.workerA.run_at)).toBe(
+        Math.floor(runAt.getTime() / 1000) * 1000,
+      );
     });
 
-    test.skip("can remove stuck workers and re-enqueue their jobs", () => {
-      // Phase 4: requires a live Worker.
+    test("can remove stuck workers and re-enqueue their jobs", async () => {
+      await seedActiveWorker(
+        queue,
+        "workerA",
+        "stuck-clean",
+        [{ a: 1 }],
+        new Date(Date.now() - 10_000),
+      );
+      const cleaned = await queue.cleanOldWorkers(1_000);
+      expect(cleaned.workerA?.payload.args).toEqual([{ a: 1 }]);
+      expect(await queue.failedCount()).toBe(1);
+      await queue.retryStuckJobs();
+      expect(await queue.failedCount()).toBe(0);
+      expect(await queue.length("stuck-clean")).toBe(1);
     });
 
-    test.skip("will not remove stuck jobs within the time limit", () => {
-      // Phase 4: requires a live Worker.
+    test("will not remove stuck jobs within the time limit", async () => {
+      await seedActiveWorker(queue, "workerA", "recent-worker", [], new Date());
+      expect(await queue.cleanOldWorkers(60_000)).toEqual({});
+      expect(await queue.workers()).toEqual({ workerA: "recent-worker" });
     });
 
-    test.skip("can forceClean a worker, returning the error payload", () => {
-      // Phase 4: requires a live Worker.
+    test("can forceClean a worker, returning the error payload", async () => {
+      await seedActiveWorker(
+        queue,
+        "workerA",
+        "force-clean",
+        [{ a: 1 }],
+        new Date(),
+      );
+      const failure = await queue.forceCleanWorker("workerA");
+      expect(failure?.worker).toBe("workerA");
+      expect(failure?.queue).toBe("force-clean");
+      expect(failure?.payload.args).toEqual([{ a: 1 }]);
+      expect(failure?.backtrace[1]).toBe("queue#forceCleanWorker");
     });
 
-    test.skip("can forceClean a worker, returning the error payload and removing all keys it had set in redis", () => {
-      // Phase 4: requires a live Worker.
+    test("can forceClean a worker, returning the error payload and removing all keys it had set in redis", async () => {
+      const id = await seedActiveWorker(
+        queue,
+        "workerA",
+        "force-clean-keys",
+        [],
+        new Date(),
+      );
+      await queue.forceCleanWorker("workerA");
+      expect(await queue.workers()).toEqual({});
+      expect(await queue.workingOn("workerA", "force-clean-keys")).toBeNull();
+      expect((await queue.failed(0, -1))[0]?.id).toBe(id);
     });
 
-    test.skip("retryStuckJobs", () => {
-      // Phase 4: requires a live Worker.
+    test("forceCleanWorker emits an error for an unknown worker", async () => {
+      const error = new Promise<Error>((resolve) => {
+        queue.once("error", resolve);
+      });
+      expect(await queue.forceCleanWorker("missing-worker")).toBeUndefined();
+      expect((await error).message).toContain("cannot find queues");
+    });
+
+    test("retryStuckJobs", async () => {
+      await seedActiveWorker(queue, "workerA", "retry-one", [1], new Date());
+      await queue.forceCleanWorker("workerA");
+      await seedActiveWorker(queue, "workerB", "retry-two", [2], new Date());
+      await queue.forceCleanWorker("workerB");
+
+      await queue.retryStuckJobs(1);
+      expect(await queue.failedCount()).toBe(1);
+      expect(
+        (await queue.length("retry-one")) + (await queue.length("retry-two")),
+      ).toBe(1);
+      await queue.retryStuckJobs(0);
+      expect(await queue.failedCount()).toBe(1);
     });
   });
 });

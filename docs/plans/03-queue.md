@@ -116,12 +116,12 @@ Skip only tests that poke Redis keys directly if any remain inside queue.ts (the
 ## Acceptance criteria
 
 - All Queue methods exist with JSDoc copied/adapted from node-resque
-- `__tests__/core/queue.ts` port is green on CI (worker-status tests that start a Worker wait for Phase 4 — split those into a `describe` marked pending **or** implement after Phase 4; prefer implementing worker methods against empty tables so idle tests pass, and mark `active workingOn` pending)
+- `__tests__/core/queue.test.ts` is green. Worker-status methods are tested with seeded `pgrq_workers` and active pg-boss jobs; Phase 4 will additionally exercise them through a live Worker.
 
 Recommended split:
 
-- Phase 3: enqueue, delayed, delete, failed (inject failed rows via SQL/`fail`), locks, stats, leader (null), idle workers
-- Phase 4: active `workingOn`, `forceCleanWorker` with a live worker
+- Phase 3: enqueue, delayed, delete, failed (inject failed rows via SQL/`fail`), locks, stats, leader, and worker-table behavior
+- Phase 4: repeat active `workingOn` / cleanup behavior end-to-end through a live Worker
 
 ## Next phase needs
 
@@ -133,7 +133,7 @@ Recommended split:
 - 2026-08-29: pg-boss v12 queues are explicit configuration rows/partitions, so Queue lazily calls `getQueue`/`createQueue` before `send`. Queue defaults are `retryLimit: 0` and `deleteAfterSeconds: 0` (pg-boss defines `0` as never auto-delete); scheduler retention remains authoritative.
 - 2026-08-29: Delayed duplicate identity is reserved in `pgrq_locks` under a private `timestamps:{payload}:delayed:{second}` key until the scheduled second passes. This makes concurrent duplicate checks atomic without modifying pg-boss's partitioned `job` schema; `locks()` intentionally exposes only plugin `lock:*` and `workerslock:*` rows.
 - 2026-08-29: Upstream queue tests schedule at Unix millisecond `10000`, but pg-boss correctly treats 1970 timestamps as immediately runnable. The PostgreSQL port uses future rounded timestamps while retaining the same test titles and timestamp-unit assertions.
-- 2026-08-29: Phase 3 completed with 36 Queue tests passing against PostgreSQL (plus six live-Worker titles explicitly deferred to Phase 4). The full suite, Biome, TypeScript build, and Node package import are green.
+- 2026-08-29: Phase 3 initially completed with 36 Queue tests passing against PostgreSQL. Follow-up review added direct metadata coverage for all Queue worker-status methods; Phase 4 retains responsibility for end-to-end live-Worker coverage.
 - 2026-08-29: `pgrq_stats` stores numeric counters, but `Queue.stats()` stringifies them to retain node-resque's Redis `MGET` response shape (`{ processed: "2", failed: "1" }`).
 - 2026-08-29: Bugbot: an in-process `knownQueues` cache survived `delQueue` on another `Queue` instance, so later `send` skipped `createQueue`. `ensureQueue` now always checks pg-boss and retries once on `Queue does not exist`.
 - 2026-08-29: Bugbot: `delQueue` only skipped `delete_queue` when `active` rows remained, so a concurrent `created` insert could be dropped. It now locks the pg-boss queue row, deletes non-active jobs, and drops the queue only when no rows remain.
@@ -142,3 +142,4 @@ Recommended split:
 - 2026-08-29: Bugbot: `delayedAt` omitted `start_after > now()`, so a timestamp whose second had arrived still listed jobs that `length`/`queued` already treated as ready. It now uses the same delayed filter as `timestamps` / `scheduledAt` / `delDelayed`.
 - 2026-08-29: Bugbot: delayed duplicate lock keys embedded the encoded JSON and overflowed the `pgrq_locks` btree for large payloads. Keys now use `sha256(encoded)` plus the timestamp second.
 - 2026-08-29: Bugbot: `delQueue` rebuilt those keys from jsonb-loaded args, whose object key order can differ from `JSON.stringify` at enqueue time. The hash now canonicalizes nested object keys so delete and re-enqueue agree.
+- 2026-08-29: Coverage audit found untested `del(count)`, `delByFunction(start, stop)`, expired-lock cleanup, concurrent delayed enqueue, queue-row serialization, `cleanOldWorkers`, `retryStuckJobs`, active `workingOn`, and unknown-worker errors. These now have focused PostgreSQL tests rather than being deferred wholesale to Phase 4.
