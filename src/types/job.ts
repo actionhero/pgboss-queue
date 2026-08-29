@@ -7,7 +7,7 @@ export interface JobDefinition {
   /** Options keyed by plugin class name. */
   pluginOptions?: Record<string, Record<string, unknown>>;
   /** Execute the job with its encoded arguments. */
-  perform: (...args: unknown[]) => unknown | Promise<unknown>;
+  perform: (...args: never[]) => unknown | Promise<unknown>;
 }
 
 /** Constructor shape accepted in a job's `plugins` list. */
@@ -23,6 +23,8 @@ export type PluginConstructor = new (
 /** Minimal host surface needed by plugin instances. */
 export interface PluginHost {
   jobs: Jobs;
+  /** Mutable execution error exposed to plugin hooks by Worker. */
+  error?: Error;
 }
 
 /** Function-form jobs are shorthand for `{ perform: fn }`. */

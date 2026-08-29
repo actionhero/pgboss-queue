@@ -405,14 +405,28 @@ describe("queue", () => {
       expect(await queue.queues()).not.toContain("temporary");
     });
 
-    test("lists idle workers from metadata", async () => {
+    test("can list running workers", async () => {
       await queue.connection.query(
         `INSERT INTO ${specHelper.schema}.pgrq_workers (name, queues)
-         VALUES ('workerA', $1)`,
+         VALUES ('workerA', $1), ('workerB', $1)`,
         [specHelper.queue],
       );
-      expect(await queue.workers()).toEqual({ workerA: specHelper.queue });
-      expect(await queue.allWorkingOn()).toEqual({ workerA: "started" });
+      expect(await queue.workers()).toEqual({
+        workerA: specHelper.queue,
+        workerB: specHelper.queue,
+      });
+    });
+
+    test("we can see what workers are working on (idle)", async () => {
+      await queue.connection.query(
+        `INSERT INTO ${specHelper.schema}.pgrq_workers (name, queues)
+         VALUES ('workerA', $1), ('workerB', $1)`,
+        [specHelper.queue],
+      );
+      expect(await queue.allWorkingOn()).toEqual({
+        workerA: "started",
+        workerB: "started",
+      });
       expect(await queue.workingOn("workerA", specHelper.queue)).toBeNull();
     });
 
@@ -421,6 +435,22 @@ describe("queue", () => {
     });
 
     test.skip("can remove stuck workers and re-enqueue their jobs", () => {
+      // Phase 4: requires a live Worker.
+    });
+
+    test.skip("will not remove stuck jobs within the time limit", () => {
+      // Phase 4: requires a live Worker.
+    });
+
+    test.skip("can forceClean a worker, returning the error payload", () => {
+      // Phase 4: requires a live Worker.
+    });
+
+    test.skip("can forceClean a worker, returning the error payload and removing all keys it had set in redis", () => {
+      // Phase 4: requires a live Worker.
+    });
+
+    test.skip("retryStuckJobs", () => {
       // Phase 4: requires a live Worker.
     });
   });

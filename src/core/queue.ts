@@ -252,10 +252,28 @@ export class Queue extends EventEmitter {
    * @returns Number of jobs deleted.
    */
   async delQueue(q: string): Promise<number> {
-    const result = await this.connection.query(
+    const result = await this.connection.query<{
+      data: unknown;
+      start_after: Date;
+    }>(
       `DELETE FROM ${this.connection.schema}.job
-       WHERE name = $1 AND state <> 'active'`,
+       WHERE name = $1 AND state <> 'active'
+       RETURNING data, start_after`,
       [q],
+    );
+    await Promise.all(
+      result.rows
+        .filter((row) => new Date(row.start_after).getTime() > Date.now())
+        .map((row) => {
+          const payload = parseJob(row.data, q);
+          const second = Math.round(new Date(row.start_after).getTime() / 1000);
+          return this.connection.delLock(
+            delayedLockKey(
+              this.encode(payload.queue, payload.class, payload.args),
+              second,
+            ),
+          );
+        }),
     );
     const active = await this.connection.query<{ exists: boolean }>(
       `SELECT EXISTS (
