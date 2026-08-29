@@ -405,6 +405,31 @@ describe("queue", () => {
       expect(await queue.queues()).not.toContain("temporary");
     });
 
+    test("can re-enqueue after another instance deletes the queue", async () => {
+      const other = new Queue({
+        connection: specHelper.cleanConnectionDetails(),
+      });
+      await other.connect();
+      await queue.enqueue("recycle", "job", [1]);
+      expect(await other.delQueue("recycle")).toBe(1);
+      expect(await queue.enqueue("recycle", "job", [2])).toBe(true);
+      expect(await queue.length("recycle")).toBe(1);
+      await other.end();
+    });
+
+    test("does not drop jobs that remain after delQueue", async () => {
+      await queue.enqueue("busy", "job", [1]);
+      await queue.connection.query(
+        `UPDATE ${specHelper.schema}.job
+         SET state = 'active'
+         WHERE name = 'busy'`,
+      );
+      expect(await queue.delQueue("busy")).toBe(0);
+      expect(await queue.queues()).toContain("busy");
+      expect(await queue.enqueue("busy", "job", [2])).toBe(true);
+      expect(await queue.length("busy")).toBe(1);
+    });
+
     test("can list running workers", async () => {
       await queue.connection.query(
         `INSERT INTO ${specHelper.schema}.pgrq_workers (name, queues)

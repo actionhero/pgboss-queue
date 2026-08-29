@@ -135,3 +135,5 @@ Recommended split:
 - 2026-08-29: Upstream queue tests schedule at Unix millisecond `10000`, but pg-boss correctly treats 1970 timestamps as immediately runnable. The PostgreSQL port uses future rounded timestamps while retaining the same test titles and timestamp-unit assertions.
 - 2026-08-29: Phase 3 completed with 36 Queue tests passing against PostgreSQL (plus six live-Worker titles explicitly deferred to Phase 4). The full suite, Biome, TypeScript build, and Node package import are green.
 - 2026-08-29: `pgrq_stats` stores numeric counters, but `Queue.stats()` stringifies them to retain node-resque's Redis `MGET` response shape (`{ processed: "2", failed: "1" }`).
+- 2026-08-29: Bugbot: an in-process `knownQueues` cache survived `delQueue` on another `Queue` instance, so later `send` skipped `createQueue`. `ensureQueue` now always checks pg-boss and retries once on `Queue does not exist`.
+- 2026-08-29: Bugbot: `delQueue` only skipped `delete_queue` when `active` rows remained, so a concurrent `created` insert could be dropped. It now locks the pg-boss queue row, deletes non-active jobs, and drops the queue only when no rows remain.

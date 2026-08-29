@@ -69,8 +69,6 @@ export class Queue extends EventEmitter {
   /** Underlying PostgreSQL / pg-boss connection. */
   readonly connection: Connection;
 
-  private readonly knownQueues = new Set<string>();
-
   /**
    * @param options - Queue options containing PostgreSQL connection settings.
    * @param jobs - Named job implementations. Functions are accepted as shorthand.
@@ -125,15 +123,7 @@ export class Queue extends EventEmitter {
     );
     if (!toRun) return false;
 
-    await this.ensureQueue(q);
-    const id = await this.connection.boss.send(
-      q,
-      this.payload(q, func, normalizedArgs),
-      { retryLimit: 0, deleteAfterSeconds: 0 },
-    );
-    if (!id) {
-      throw new Error(`pg-boss did not enqueue job "${func}" on queue "${q}"`);
-    }
+    await this.sendJob(q, this.payload(q, func, normalizedArgs));
 
     await runPlugins(
       this,
@@ -177,7 +167,6 @@ export class Queue extends EventEmitter {
       second,
     );
 
-    await this.ensureQueue(q);
     const acquired = await this.acquireDelayedLock(duplicateKey, startAfter);
     if (!acquired) {
       if (suppressDuplicateTaskError) return undefined;
@@ -185,16 +174,7 @@ export class Queue extends EventEmitter {
     }
 
     try {
-      const id = await this.connection.boss.send(q, payload, {
-        retryLimit: 0,
-        deleteAfterSeconds: 0,
-        startAfter,
-      });
-      if (!id) {
-        throw new Error(
-          `pg-boss did not schedule job "${func}" on queue "${q}"`,
-        );
-      }
+      await this.sendJob(q, payload, { startAfter });
     } catch (error) {
       await this.connection.delLock(duplicateKey);
       throw error;
@@ -252,42 +232,59 @@ export class Queue extends EventEmitter {
    * @returns Number of jobs deleted.
    */
   async delQueue(q: string): Promise<number> {
-    const result = await this.connection.query<{
-      data: unknown;
-      start_after: Date;
-    }>(
-      `DELETE FROM ${this.connection.schema}.job
-       WHERE name = $1 AND state <> 'active'
-       RETURNING data, start_after`,
-      [q],
-    );
-    await Promise.all(
-      result.rows
-        .filter((row) => new Date(row.start_after).getTime() > Date.now())
-        .map((row) => {
-          const payload = parseJob(row.data, q);
-          const second = Math.round(new Date(row.start_after).getTime() / 1000);
-          return this.connection.delLock(
-            delayedLockKey(
-              this.encode(payload.queue, payload.class, payload.args),
-              second,
-            ),
-          );
-        }),
-    );
-    const active = await this.connection.query<{ exists: boolean }>(
-      `SELECT EXISTS (
-         SELECT 1 FROM ${this.connection.schema}.job
-         WHERE name = $1 AND state = 'active'
-       ) AS exists`,
-      [q],
-    );
-    if (!active.rows[0]?.exists) {
-      const configured = await this.connection.boss.getQueue(q);
-      if (configured) await this.connection.boss.deleteQueue(q);
-      this.knownQueues.delete(q);
+    const schema = this.connection.schema;
+    const client = await this.connection.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const locked = await client.query(
+        `SELECT name FROM ${schema}.queue WHERE name = $1 FOR UPDATE`,
+        [q],
+      );
+      const result = await client.query<{
+        data: unknown;
+        start_after: Date;
+      }>(
+        `DELETE FROM ${schema}.job
+         WHERE name = $1 AND state <> 'active'
+         RETURNING data, start_after`,
+        [q],
+      );
+      const remaining = await client.query<{ exists: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1 FROM ${schema}.job WHERE name = $1
+         ) AS exists`,
+        [q],
+      );
+      if (!remaining.rows[0]?.exists && (locked.rowCount ?? 0) > 0) {
+        await client.query(`SELECT ${schema}.delete_queue($1)`, [q]);
+      }
+      await client.query("COMMIT");
+
+      await Promise.all(
+        result.rows
+          .filter((row) => new Date(row.start_after).getTime() > Date.now())
+          .map((row) => {
+            const payload = parseJob(row.data, q);
+            const second = Math.round(
+              new Date(row.start_after).getTime() / 1000,
+            );
+            return this.connection.delLock(
+              delayedLockKey(
+                this.encode(payload.queue, payload.class, payload.args),
+                second,
+              ),
+            );
+          }),
+      );
+      return result.rowCount ?? 0;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {
+        // Transaction may already be closed.
+      });
+      throw error;
+    } finally {
+      client.release();
     }
-    return result.rowCount ?? 0;
   }
 
   /**
@@ -807,20 +804,46 @@ export class Queue extends EventEmitter {
     return { class: func, queue: q, args };
   }
 
-  private async ensureQueue(q: string): Promise<void> {
-    if (this.knownQueues.has(q)) return;
-    const existing = await this.connection.boss.getQueue(q);
-    if (!existing) {
+  private async sendJob(
+    q: string,
+    payload: ParsedJob,
+    options: { startAfter?: Date } = {},
+  ): Promise<string> {
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await this.ensureQueue(q);
       try {
-        await this.connection.boss.createQueue(q, {
+        const id = await this.connection.boss.send(q, payload, {
           retryLimit: 0,
           deleteAfterSeconds: 0,
+          ...options,
         });
+        if (!id) {
+          throw new Error(
+            `pg-boss did not enqueue job "${payload.class}" on queue "${q}"`,
+          );
+        }
+        return id;
       } catch (error) {
-        if (!(await this.connection.boss.getQueue(q))) throw error;
+        lastError = toError(error);
+        if (attempt === 0 && isMissingQueue(lastError, q)) continue;
+        throw lastError;
       }
     }
-    this.knownQueues.add(q);
+    throw lastError ?? new Error(`pg-boss did not enqueue job on queue "${q}"`);
+  }
+
+  private async ensureQueue(q: string): Promise<void> {
+    const existing = await this.connection.boss.getQueue(q);
+    if (existing) return;
+    try {
+      await this.connection.boss.createQueue(q, {
+        retryLimit: 0,
+        deleteAfterSeconds: 0,
+      });
+    } catch (error) {
+      if (!(await this.connection.boss.getQueue(q))) throw error;
+    }
   }
 
   private async acquireDelayedLock(
@@ -953,4 +976,12 @@ function sqlRange(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isMissingQueue(error: Error, q: string): boolean {
+  return error.message.includes(`Queue ${q} does not exist`);
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
