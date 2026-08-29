@@ -658,17 +658,27 @@ export class Queue extends EventEmitter {
     working: ParsedWorkerPayload,
     errorPayload: ErrorPayload,
   ): Promise<void> {
+    const schema = this.connection.schema;
     const updated = await this.connection.query(
-      `UPDATE ${this.connection.schema}.job
+      `WITH selected AS (
+         SELECT name, id
+         FROM ${schema}.job
+         WHERE name = $1
+           AND state = 'active'
+           AND (
+             ($4::uuid IS NOT NULL AND id = $4)
+             OR ($4::uuid IS NULL AND data = $2::jsonb)
+           )
+         ORDER BY started_on NULLS FIRST, created_on, id
+         LIMIT 1
+         FOR UPDATE
+       )
+       UPDATE ${schema}.job AS job
        SET state = 'failed',
            completed_on = now(),
            output = $3::jsonb
-       WHERE name = $1
-         AND state = 'active'
-         AND (
-           ($4::uuid IS NOT NULL AND id = $4)
-           OR ($4::uuid IS NULL AND data = $2::jsonb)
-         )`,
+       FROM selected
+       WHERE job.name = selected.name AND job.id = selected.id`,
       [
         working.queue,
         JSON.stringify(working.payload),

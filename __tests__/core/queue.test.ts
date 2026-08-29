@@ -469,6 +469,38 @@ describe("queue", () => {
       expect(Number(active.rows[0]?.count)).toBe(0);
     });
 
+    test("forceCleanWorker without a job id fails only one matching active job", async () => {
+      await queue.enqueue("twins", "slowJob", [1]);
+      await queue.enqueue("twins", "slowJob", [1]);
+      const fetched = await queue.connection.boss.fetch<{
+        class: string;
+        queue: string;
+        args: unknown[];
+      }>("twins", { batchSize: 2 });
+      expect(fetched).toHaveLength(2);
+      await queue.connection.query(
+        `INSERT INTO ${specHelper.schema}.pgrq_workers (name, queues, working_on)
+         VALUES ('workerA', 'twins', $1::jsonb)`,
+        [
+          JSON.stringify({
+            run_at: new Date().toString(),
+            queue: "twins",
+            worker: "workerA",
+            payload: fetched[0]?.data,
+          }),
+        ],
+      );
+
+      await queue.forceCleanWorker("workerA");
+      expect(await queue.failedCount()).toBe(1);
+      const active = await queue.connection.query<{ count: string }>(
+        `SELECT count(*)::text AS count
+         FROM ${specHelper.schema}.job
+         WHERE name = 'twins' AND state = 'active'`,
+      );
+      expect(Number(active.rows[0]?.count)).toBe(1);
+    });
+
     test("can list running workers", async () => {
       await queue.connection.query(
         `INSERT INTO ${specHelper.schema}.pgrq_workers (name, queues)
