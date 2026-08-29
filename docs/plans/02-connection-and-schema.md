@@ -27,7 +27,7 @@ export interface ConnectionOptions {
    */
   pool?: import("pg").Pool;
   /**
-   * Queue and metadata schema. Default `pg_queue`.
+   * Queue and metadata schema. Default `pgqueue`.
    * Must match `^[a-zA-Z_][a-zA-Z0-9_]*$` (reject otherwise).
    */
   schema?: string;
@@ -248,4 +248,5 @@ Do not defer these to Phase 8.
 - 2026-08-26: Node ESM (`"type": "module"`) requires relative import specifiers with `.js` extensions in emitted `dist/` (e.g. `from "./core/connection.js"`). Without them, `node scripts/assert-node-package.mjs` fails with `ERR_MODULE_NOT_FOUND` even though `tsc` and Bun tests pass.
 - 2026-08-29: Removed pg-boss after Phase 3 confirmed that its lifecycle and schema added coupling without supplying the resque runtime. Migrations now ship as numbered SQL files, execute under an advisory lock in one transaction, and are included in the npm package.
 - 2026-08-29: `connect()` must execute `SELECT 1`; constructing `pg.Pool` is lazy and does not prove credentials, routing, or database availability.
+- 2026-08-29: PostgreSQL reserves schema names beginning with `pg_`, so the renamed project cannot default to `pg_queue`. The default is `pgqueue`, and validation rejects the reserved prefix before migration.
 - 2026-08-29: Phase 3 restored node-resque's optional `QueueOptions.queue` field. Queue methods still take an explicit queue name, but retaining the constructor field lets existing typed call sites migrate without an excess-property error.

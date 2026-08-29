@@ -7,10 +7,10 @@ describe("connection error", () => {
       const brokenConnection = new Connection({
         host: "127.0.0.1",
         port: 1,
-        database: "pg_queue_test",
+        database: "pgqueue_test",
         user: "postgres",
         password: "postgres",
-        schema: "pg_queue_test",
+        schema: "pgqueue_test",
       });
 
       let sawErrorEvent = false;

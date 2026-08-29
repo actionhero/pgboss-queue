@@ -33,7 +33,7 @@ CI must exist **before** Queue/Worker code. An empty `expect(true)` that never o
 - `.gitignore` — `node_modules`, `dist`, `.env`, `docs/.vitepress/dist`, `*.log`
 - `LICENSE` — Apache-2.0
 - `.nvmrc` or `.node-version` — `26`
-- `.env.example` — `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pg_queue_test`
+- `.env.example` — `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgqueue_test`
 
 ### Source stub
 
@@ -51,7 +51,7 @@ No `docker-compose.yml`. CI starts Postgres as a GitHub Actions service. Locally
 `.env.example` is the only local-DB contract:
 
 ```
-DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pg_queue_test
+DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgqueue_test
 ```
 
 ### Test harness (not a dummy assert)
@@ -59,7 +59,7 @@ DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pg_queue_test
 `__tests__/utils/specHelper.ts` — the same helper later phases grow. In this phase it must:
 
 - Read `DATABASE_URL` (fail the suite with a clear message if unset)
-- Export `connectionDetails`, `timeout` (e.g. 500), `queue` (a default queue name), `schema` (default `pg_queue_test`)
+- Export `connectionDetails`, `timeout` (e.g. 500), `queue` (a default queue name), `schema` (default `pgqueue_test`)
 - `connect()` / `disconnect()` against `pg.Pool`
 - `cleanup()` — no-op or `SELECT 1` until Phase 2 adds truncate/migrate
 - `popFromQueue()` — throw `"not implemented"` until Phase 3 (do not silently return null)
@@ -76,7 +76,7 @@ Do **not** ship only `expect(true).toBe(true)`. Tests use `bun:test`. Node compa
 
 `.github/workflows/test.yaml` is the product gate from this PR onward. Jobs: `lint`, `build`, `test` (Postgres 16 service, **Bun `bun:test`**), `node-package` (Node 26 imports the compiled package), `complete`.
 
-- `test`: `bun run test` with `DATABASE_URL=postgres://postgres:postgres@localhost:5432/pg_queue_test`
+- `test`: `bun run test` with `DATABASE_URL=postgres://postgres:postgres@localhost:5432/pgqueue_test`
 - `node-package`: `actions/setup-node` from `.nvmrc` (26), `bun run build`, then **`node scripts/assert-node-package.mjs`** (not `bun run`; no Postgres)
 
 See the workflow file for the YAML. Do not duplicate a second test pipeline in Phase 10.

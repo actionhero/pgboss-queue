@@ -7,7 +7,7 @@ import {
   type QueryResultRow,
 } from "pg";
 
-const DEFAULT_SCHEMA = "pg_queue";
+const DEFAULT_SCHEMA = "pgqueue";
 const DEFAULT_APPLICATION_NAME = "pg-queue";
 const SCHEMA_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 const LEADER_SLOT = "default";
@@ -55,7 +55,7 @@ export interface ConnectionOptions {
    * Analogous to passing `redis: ioredisInstance`.
    */
   pool?: Pool;
-  /** Queue schema. Default `pg_queue`; must be a legal SQL identifier. */
+  /** Queue schema. Default `pgqueue`; must be a legal SQL identifier. */
   schema?: string;
   /** Reported to Postgres as `application_name`. Default `pg-queue`. */
   application_name?: string;
@@ -600,6 +600,11 @@ export class Connection extends EventEmitter {
 export function assertSchema(schema: string): void {
   if (!SCHEMA_PATTERN.test(schema)) {
     throw new Error(`Invalid schema "${schema}": must match ${SCHEMA_PATTERN}`);
+  }
+  if (schema.toLowerCase().startsWith("pg_")) {
+    throw new Error(
+      `Invalid schema "${schema}": PostgreSQL reserves the "pg_" prefix`,
+    );
   }
 }
 

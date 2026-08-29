@@ -12,7 +12,7 @@ if (!connectionString) {
   );
 }
 
-export const schema = "pg_queue_test";
+export const schema = "pgqueue_test";
 export const timeout = 500;
 export const queue = "default";
 
@@ -100,11 +100,8 @@ export async function cleanup(): Promise<void> {
 
   const names = new Set(tables.rows.map((row) => row.table_name));
 
-  if (names.has("pgrq_jobs")) {
-    await connection.query(`TRUNCATE TABLE ${schema}.pgrq_jobs`);
-  }
-
-  const meta = [
+  const dataTables = [
+    "pgrq_jobs",
     "pgrq_queues",
     "pgrq_leader",
     "pgrq_workers",
@@ -112,9 +109,11 @@ export async function cleanup(): Promise<void> {
     "pgrq_stats",
   ].filter((name) => names.has(name));
 
-  if (meta.length > 0) {
+  if (dataTables.length > 0) {
     await connection.query(
-      `TRUNCATE TABLE ${meta.map((name) => `${schema}.${name}`).join(", ")}`,
+      `TRUNCATE TABLE ${dataTables
+        .map((name) => `${schema}.${name}`)
+        .join(", ")}`,
     );
   }
 }

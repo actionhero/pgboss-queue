@@ -60,7 +60,7 @@ bun docs:dev                # VitePress (Phase 9)
 Local Postgres: set `DATABASE_URL` (see `.env.example`). CI starts Postgres as a workflow service; there is no `docker-compose.yml`.
 
 ```bash
-# DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pg_queue_test
+# DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgqueue_test
 ```
 
 Tests create and tear down the configured schema per file (see `specHelper`). Never point tests at a production database.
@@ -112,7 +112,7 @@ type ConnectionOptions = {
   password?: string;
   ssl?: boolean | object;
   pool?: import("pg").Pool;           // bring-your-own pool
-  schema?: string;                    // default "pg_queue" (was Redis namespace)
+  schema?: string;                    // default "pgqueue" (was Redis namespace)
 };
 
 type SchedulerOptions = ConnectionOptions & {

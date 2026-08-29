@@ -55,7 +55,7 @@ Pass a Postgres URL (not a Redis URL):
 ```ts
 const connection = {
   connectionString: "postgres://user:pass@host:5432/dbname",
-  schema: "pg_queue", // optional; default "pg_queue"
+  schema: "pgqueue", // optional; default "pgqueue"
 };
 ```
 
@@ -77,7 +77,7 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const connection = { pool };
 ```
 
-`schema` isolates this library's `pgrq_*` tables inside one Postgres database. It defaults to `pg_queue` and must be a legal SQL identifier (`letters`, `numbers`, `_`).
+`schema` isolates this library's `pgrq_*` tables inside one Postgres database. It defaults to `pgqueue` and must be a legal SQL identifier (`letters`, `numbers`, `_`) that does not begin with PostgreSQL's reserved `pg_` prefix.
 
 Coming from node-resque: replace `{ host, port, password, database: 0 }` / `{ redis }` / `{ namespace: "resque" }` with `{ connectionString }` or `{ pool }` and `{ schema }`.
 

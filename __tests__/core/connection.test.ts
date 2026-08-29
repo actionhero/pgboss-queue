@@ -16,6 +16,12 @@ describe("connection", () => {
     await specHelper.disconnect();
   });
 
+  test("uses PostgreSQL-safe project defaults", () => {
+    const connection = new Connection();
+    expect(connection.schema).toBe("pgqueue");
+    expect(connection.options.application_name).toBe("pg-queue");
+  });
+
   test("should start with no redis keys in the namespace", async () => {
     // Adapt: after cleanup, no job rows and no pgrq_* rows
     const pool = await specHelper.connect();
@@ -215,6 +221,9 @@ describe("connection", () => {
       /Invalid schema/,
     );
     expect(() => new Connection({ schema: "" })).toThrow(/Invalid schema/);
+    expect(() => new Connection({ schema: "pg_queue" })).toThrow(
+      /reserves the "pg_" prefix/,
+    );
   });
 
   test("reject Redis options", () => {

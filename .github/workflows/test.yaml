@@ -33,7 +33,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: pg_queue_test
+          POSTGRES_DB: pgqueue_test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -47,7 +47,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run test
         env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/pg_queue_test
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/pgqueue_test
 
   node-package:
     runs-on: ubuntu-latest

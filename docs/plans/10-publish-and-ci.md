@@ -107,7 +107,7 @@ Do not publish `0.0.1` empty stubs. First intentional bump to `0.1.0` is the fir
 Port node-resque `examples/` in Phases 4–7. This phase can add a compose-based example command if missing:
 
 ```bash
-DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pg_queue_test bun examples/example.ts
+DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgqueue_test bun examples/example.ts
 ```
 
 Optional: `examples/docker` like node-resque — not required for v1.

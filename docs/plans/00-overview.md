@@ -35,7 +35,7 @@ We therefore own a deliberately small, versioned schema: `pgrq_queues`, `pgrq_jo
 | node-resque (Redis) | pg-queue (Postgres) |
 | --- | --- |
 | `connection.host/port/database/password` (Redis) | `connectionString` **or** `host/port/database/user/password/ssl` **or** `pool` |
-| `namespace` / keyPrefix | `schema` (default `pg_queue`) |
+| `namespace` / keyPrefix | `schema` (default `pgqueue`) |
 | List `queue:{name}` (`RPUSH`/`LPOP`) | `pgrq_jobs`, `state IN ('created','retry')`, `start_after <= now()` |
 | `delayed:{ts}` + `delayed_queue_schedule` zset | `pgrq_jobs.start_after` in the future |
 | `failed` list | `pgrq_jobs.state = 'failed'` (payload mapped to `ParsedFailedJobPayload`) |
@@ -73,7 +73,7 @@ Same as `node-resque/src/index.ts`:
 ## Lessons from keryx#519 (use)
 
 1. **Connection strings, not Redis hashes.** `config.database.connectionString` / `new PgBoss({ connectionString, schema })`.
-2. **Schema isolation.** Default `keryx_tasks` there; we default `pg_queue`. Validate identifier safety (`^[a-zA-Z_][a-zA-Z0-9_]*$`).
+2. **Schema isolation.** Default `keryx_tasks` there; we default `pgqueue`. Validate identifier safety (`^[a-zA-Z_][a-zA-Z0-9_]*$`) and reject PostgreSQL's reserved `pg_` prefix.
 3. **SQL introspection.** `queued`, `del`, `delDelayed`, `scheduledAt`, and `failed*` are parameterized SQL on `pgrq_jobs`.
 4. **Payload shape.** Store `{ class, queue, args }` (resque encode) in `data`.
 5. **Create queues lazily.** Insert `pgrq_queues` with `ON CONFLICT DO NOTHING` before enqueue.
