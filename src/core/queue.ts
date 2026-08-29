@@ -498,6 +498,7 @@ export class Queue extends EventEmitter {
       `SELECT id, name, data, created_on, start_after
        FROM ${this.connection.schema}.job
        WHERE state = ANY(ARRAY['created','retry']::${this.connection.schema}.job_state[])
+         AND start_after > now()
          AND start_after >= to_timestamp($1)
          AND start_after < to_timestamp($1) + interval '1 second'
        ORDER BY created_on, id`,

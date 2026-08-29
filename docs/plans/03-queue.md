@@ -139,3 +139,4 @@ Recommended split:
 - 2026-08-29: Bugbot: `delQueue` only skipped `delete_queue` when `active` rows remained, so a concurrent `created` insert could be dropped. It now locks the pg-boss queue row, deletes non-active jobs, and drops the queue only when no rows remain.
 - 2026-08-29: Bugbot: `forceCleanWorker` inserted a second `failed` row and left the original job `active`. It now updates the in-flight job to `failed` (by id when recorded, otherwise by matching `data`) and only inserts if no active row exists.
 - 2026-08-29: Bugbot: the data-only fallback could fail every identical `active` payload. The update now selects a single matching row (`LIMIT 1 … FOR UPDATE`).
+- 2026-08-29: Bugbot: `delayedAt` omitted `start_after > now()`, so a timestamp whose second had arrived still listed jobs that `length`/`queued` already treated as ready. It now uses the same delayed filter as `timestamps` / `scheduledAt` / `delDelayed`.

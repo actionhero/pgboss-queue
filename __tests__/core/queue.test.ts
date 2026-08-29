@@ -361,6 +361,13 @@ describe("queue", () => {
           String(timestamp + 2000),
         ]);
       });
+
+      test("does not list already-ready jobs as delayed", async () => {
+        const timestamp = Math.round((Date.now() - 5000) / 1000) * 1000;
+        await queue.enqueueAt(timestamp, specHelper.queue, "job1", [1]);
+        expect((await queue.delayedAt(timestamp)).tasks).toHaveLength(0);
+        expect(await queue.length(specHelper.queue)).toBe(1);
+      });
     });
 
     test("runs enqueue plugins in order and honors vetoes", async () => {
