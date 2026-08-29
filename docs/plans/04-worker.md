@@ -50,20 +50,20 @@ Write `pgrq_workers`:
 - After a full empty pass, `pause()` (emit `pause`, `setTimeout(timeout)`, poll again).
 - When using `"*"`, re-`checkQueues()` at the end of a pass so new queues appear (test: `will notice new job queues when started with queues=*`).
 
-Do **not** rely on pg-boss `work()` localConcurrency to implement this. Walk queues in JS.
+Walk queues in JS so array order remains queue priority.
 
 ### `getJob` (dequeue)
 
 For the current queue name:
 
 ```ts
-const [job] = await boss.fetch(queue, { batchSize: 1 });
+const job = await connection.fetchJob(queue);
 ```
 
-If pg-boss fetch API differs in the pinned version, use equivalent SQL:
+`Connection.fetchJob()` uses equivalent SQL:
 
 ```sql
-SELECT id, name, data FROM {schema}.job
+SELECT id, name, data FROM {schema}.pgrq_jobs
 WHERE name = $1
   AND state = 'created'  -- or 'retry'
   AND start_after <= now()
@@ -72,7 +72,7 @@ FOR UPDATE SKIP LOCKED
 LIMIT 1
 ```
 
-then mark `active`. Prefer the public `fetch` API.
+The implementation wraps this selection in a CTE that updates the selected row to `active` and returns it atomically.
 
 On fetch: set `pgrq_workers.working_on`. Return `data` as `ParsedJob`.
 
@@ -82,9 +82,9 @@ Exactly-once: two workers must never receive the same `id`. Add a test: enqueue 
 
 Port plugin `beforePerform` / `afterPerform`, frozen args, missing job class → failure `"No job defined for class …"`. Emit `job` before perform. `completeJob` → `succeed` or `fail`. Duration in ms on success/failure events.
 
-**succeed:** `boss.complete(id)`, incr `processed` + `processed:{workerName}`, emit `success`.
+**succeed:** update `pgrq_jobs` to `completed`, incr `processed` + `processed:{workerName}`, emit `success`.
 
-**fail:** `boss.fail(id, error)` (so row is `failed`), incr `failed` counters, emit `failure`. Store output so `queue.failed()` can rebuild the resque error payload. If pg-boss `fail` output is the error object, that is enough.
+**fail:** update `pgrq_jobs` to `failed` and store the error payload in `output`, incr `failed` counters, emit `failure`.
 
 Clear `working_on`. If `looping`, poll again.
 
@@ -135,4 +135,4 @@ Worker rows, pings, `forceCleanWorker`, fetch/complete/fail.
 
 ## Lessons learned
 
-_None yet._
+- 2026-08-29: The job store was brought in-house before this phase. Worker must use `Connection.fetchJob()` for the atomic `SKIP LOCKED` claim and explicit state transitions on `pgrq_jobs`.

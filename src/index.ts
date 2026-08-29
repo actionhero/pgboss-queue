@@ -1,10 +1,11 @@
 /**
- * pgboss-queue — node-resque runtime model on PostgreSQL via pg-boss.
+ * pg-queue — node-resque runtime model on PostgreSQL.
  */
 export {
   assertSchema,
   Connection,
   type ConnectionOptions,
+  type FetchedJob,
   type MultiWorkerOptions,
   type QueueOptions,
   type SchedulerOptions,

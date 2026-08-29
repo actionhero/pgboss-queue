@@ -46,7 +46,7 @@ If the same name+queue+args is already in **delayed**, skip enqueue.
 
 On failure: increment attempt, if remaining, `enqueueIn` with `retryDelay` / `backoffStrategy`, emit `reEnqueue`, clear `worker.error` so the job is not placed in failed, decr processed / incr failed stats (port exactly). After limit, cleanup keys and throw. Default `retryLimit: 1`, `retryDelay: 5000`.
 
-Do **not** also set pg-boss `retryLimit` > 0 on these jobs.
+The store performs no automatic retry; the plugin is the only retry owner.
 
 ### `Noop`
 
@@ -80,7 +80,7 @@ Also port `__tests__/core/queue.ts` `describe("locks")` if not already green.
 - All five plugins exported as `Plugins.JobLock` etc. (port `src/plugins/index.ts`)
 - Plugin tests green
 - `queue.locks()` / `delLock()` work
-- Retry does not double-retry with pg-boss
+- Retry does not double-retry at the storage layer
 - **CI green** on this PR
 
 ## Next
@@ -89,4 +89,4 @@ Phase 7 is independent. Phase 8 includes these tests in the matrix.
 
 ## Lessons learned
 
-_None yet._
+- 2026-08-29: The owned job store has no automatic retry behavior, preserving the Retry plugin as the single source of retry policy.

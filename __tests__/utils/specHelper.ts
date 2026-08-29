@@ -12,7 +12,7 @@ if (!connectionString) {
   );
 }
 
-export const schema = "pgboss_queue_test";
+export const schema = "pg_queue_test";
 export const timeout = 500;
 export const queue = "default";
 
@@ -53,7 +53,7 @@ export async function disconnect(): Promise<void> {
 }
 
 /**
- * Install pg-boss + `pgrq_*` tables into the test schema (idempotent).
+ * Install all versioned pg-queue tables into the test schema (idempotent).
  */
 export async function migrate(): Promise<void> {
   const connection = new Connection(cleanConnectionDetails());
@@ -87,17 +87,25 @@ export async function cleanup(): Promise<void> {
        AND table_name = ANY($2::text[])`,
     [
       schema,
-      ["pgrq_leader", "pgrq_workers", "pgrq_locks", "pgrq_stats", "job"],
+      [
+        "pgrq_jobs",
+        "pgrq_queues",
+        "pgrq_leader",
+        "pgrq_workers",
+        "pgrq_locks",
+        "pgrq_stats",
+      ],
     ],
   );
 
   const names = new Set(tables.rows.map((row) => row.table_name));
 
-  if (names.has("job")) {
-    await connection.query(`TRUNCATE TABLE ${schema}.job CASCADE`);
+  if (names.has("pgrq_jobs")) {
+    await connection.query(`TRUNCATE TABLE ${schema}.pgrq_jobs`);
   }
 
   const meta = [
+    "pgrq_queues",
     "pgrq_leader",
     "pgrq_workers",
     "pgrq_locks",
@@ -128,14 +136,13 @@ export async function popFromQueue(): Promise<string | null> {
   const connection = new Connection(cleanConnectionDetails());
   await connection.connect();
   try {
-    const jobs = await connection.boss.fetch<{
+    const job = await connection.fetchJob<{
       class: string;
       queue: string;
       args: unknown[];
-    }>(queue, { batchSize: 1 });
-    const job = jobs[0];
+    }>(queue);
     if (!job) return null;
-    await connection.boss.deleteJob(queue, job.id);
+    await connection.deleteJob(queue, job.id);
     return JSON.stringify(job.data);
   } finally {
     await connection.end();

@@ -5,7 +5,7 @@
 
 ## Goal
 
-Callers can connect to Postgres the way they connected to Redis in node-resque, and the library can install (1) pg-boss's schema and (2) our metadata tables. Migration is a function the **scheduler leader** will invoke; this phase only implements the primitive.
+Callers can connect to Postgres the way they connected to Redis in node-resque, and the library can install our versioned queue and metadata schema. Migration is a function the **scheduler leader** will invoke; this phase implements the primitive.
 
 ## Connection options
 
@@ -27,11 +27,11 @@ export interface ConnectionOptions {
    */
   pool?: import("pg").Pool;
   /**
-   * pg-boss schema AND our metadata schema. Default `pgboss_queue`.
+   * Queue and metadata schema. Default `pg_queue`.
    * Must match `^[a-zA-Z_][a-zA-Z0-9_]*$` (reject otherwise).
    */
   schema?: string;
-  application_name?: string; // default `pgboss-queue`
+  application_name?: string; // default `pg-queue`
 }
 
 export interface QueueOptions {
@@ -53,7 +53,7 @@ export interface SchedulerOptions extends QueueOptions {
   leaderLockTimeout?: number; // seconds, default 180
   stuckWorkerTimeout?: number | false;
   retryStuckJobs?: boolean;
-  /** Leader runs pg-boss migrate + metadata DDL. Default true. */
+  /** Leader runs bundled versioned migrations. Default true. */
   automigrate?: boolean;
   /** Leader deletes completed/cancelled jobs older than this. Default 24h. `false` disables. */
   completeJobRetentionMs?: number | false;
@@ -71,7 +71,7 @@ export interface MultiWorkerOptions extends WorkerOptions {
 
 ### Mapping help (document in JSDoc + README)
 
-| node-resque | pgboss-queue |
+| node-resque | pg-queue |
 | --- | --- |
 | `{ host, port, password, database: 0 }` | `{ connectionString }` or `{ host, port, user, password, database: "myapp" }` |
 | `{ redis: ioredis }` | `{ pool: pg.Pool }` |
@@ -84,15 +84,14 @@ Runtime rejection: `pkg`, `redis`, and numeric `database` throw from the `Connec
 
 Port `src/core/connection.ts` *behavior*, not Redis:
 
-- `connect()` — create pool unless `pool` was provided; always wrap the pool as pg-boss `db.executeSql` so `connection.pool` is a real `pg.Pool`. Construct `PgBoss` with `{ db, schema, migrate: false, supervise: false, schedule: false, application_name }`. Call `boss.start()` when the schema is installed; if pg-boss reports "not installed", leave the pool connected so `migrate()` can run, then start boss after migrate.
-- `end()` — `boss.stop({ graceful: true, close: false })` (we own / borrow the pool); `pool.end()` only if we created the pool; remove forwarded `error` listeners.
+- `connect()` — create a pool unless `pool` was provided and verify connectivity with `SELECT 1`.
+- `end()` — `pool.end()` only if we created the pool; remove forwarded `error` listeners.
 - `connected` boolean
-- Event `error` forwarded from pool and pg-boss
+- Event `error` forwarded from the pool
 - `key(...parts)` — **keep** as a helper for lock key strings (`["lock", func, queue, args].join(":")`) stored in `locks.key`. Do not prefix Redis-style. Tests that assert `resque-test-0:thing` are Redis-only (Phase 8 skip).
 
 Expose:
 
-- `connection.boss: PgBoss`
 - `connection.pool: pg.Pool` (owned or provided)
 - `connection.schema: string`
 - `connection.query<T>(text, values)` — parameterized; schema identifiers are validated once and interpolated only after `assertSchema`
@@ -101,20 +100,40 @@ Expose:
 async migrate(): Promise<void>
 ```
 
-`migrate()` is idempotent:
+`migrate()` is idempotent and concurrency-safe:
 
-1. `CREATE SCHEMA IF NOT EXISTS {schema}`
-2. Short-lived `PgBoss` with `{ db, schema, migrate: true, supervise: false, schedule: false }` → `start()` / `stop({ close: false })`
-3. Apply our metadata DDL (`CREATE TABLE IF NOT EXISTS` + indexes)
-4. `boss.start()` on the long-lived instance if it was waiting on install
+1. Begin a transaction and acquire a transaction-scoped advisory lock for the schema.
+2. `CREATE SCHEMA IF NOT EXISTS {schema}` and create `pgrq_migrations`.
+3. Apply each pending numbered script from `migrations/` in order.
+4. Record the version and commit atomically; rollback leaves no partial migration.
 
 Workers never call this. Scheduler leader will. `specHelper.migrate()` calls it in `beforeAll`.
 
 ## Metadata DDL (ours)
 
-All in `schema` (same as pg-boss), tables prefixed `pgrq_` so they never collide with pg-boss's `job`, `queue`, `schedule`, `version`, etc.
+All tables are in `schema` and prefixed `pgrq_`. `migrations/001_initial.sql` creates the job, queue, and metadata tables.
 
 ```sql
+CREATE TABLE {schema}.pgrq_queues (
+  name text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE {schema}.pgrq_jobs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL REFERENCES {schema}.pgrq_queues(name),
+  data jsonb NOT NULL,
+  state text NOT NULL CHECK (state IN (
+    'created', 'retry', 'active', 'completed', 'cancelled', 'failed'
+  )),
+  priority integer NOT NULL DEFAULT 0,
+  created_on timestamptz NOT NULL DEFAULT now(),
+  start_after timestamptz NOT NULL DEFAULT now(),
+  started_on timestamptz,
+  completed_on timestamptz,
+  output jsonb
+);
+
 -- Leader election (Redis SET NX EX analogue)
 CREATE TABLE IF NOT EXISTS {schema}.pgrq_leader (
   slot        text PRIMARY KEY DEFAULT 'default',
@@ -177,17 +196,11 @@ currentLeader(): Promise<string | null>
 
 `tryLeader` uses a single transaction. This is the Redis `SET NX EX` + refresh-if-mine pattern from `scheduler.tryForLeader`.
 
-## pg-boss constructor flags (every instance)
+## Job-store primitives
 
-| Flag | Worker / Queue | Scheduler (non-leader) | Scheduler (leader) |
-| --- | --- | --- | --- |
-| `migrate` | false | false | true iff `automigrate` |
-| `supervise` | false | false | false (we sweep) |
-| `schedule` | false | false | false (no pg-boss cron) |
+`Connection.fetchJob(queue)` atomically claims one ready job by selecting in priority/FIFO order with `FOR UPDATE SKIP LOCKED` and changing its state to `active`. `deleteJob(queue, id)` removes a claimed job. Worker adds completion/failure transitions in Phase 4.
 
-We do not want two maintenance systems. pg-boss's built-in delete/archive would race our retention policy and might drop failed jobs.
-
-Dependency: `pg-boss` (installed in this phase; currently `^12`).
+The only runtime dependency is `pg`.
 
 ## Tests (this phase)
 
@@ -200,10 +213,11 @@ Port-inspired plus the Adapt rows from Phase 8:
 - connect with `connectionString`
 - connect with discrete `host/port/user/password/database`
 - connect with shared `pool` (ending Connection does not end the pool)
-- reject illegal `schema` (`pgboss-queue`, `public; drop`, empty)
+- reject illegal `schema` (`pg-queue`, `public; drop`, empty)
 - reject Redis options (`pkg`, `redis`, numeric `database`)
-- `migrate()` creates pg-boss `job` table and `pgrq_*` tables
+- `migrate()` creates `pgrq_migrations`, `pgrq_queues`, `pgrq_jobs`, and metadata tables
 - second `migrate()` is a no-op
+- concurrent `migrate()` calls serialize and apply each version once
 - `tryLeader` : only one of two connections wins; after expiry the other wins
 - `setLockNx` / expire / `delLock` (+ stats smoke)
 - connectionError (bad host / port `127.0.0.1:1`)
@@ -232,4 +246,6 @@ Do not defer these to Phase 8.
 - 2026-08-26: pg-boss is a named ESM export (`import { PgBoss } from "pg-boss"`), not a default export. Migrator instances use `migrate: true` + `supervise: false` + `schedule: false`.
 - 2026-08-26: Version bumped `0.0.1` → `0.1.0` (first user-facing API: `Connection`).
 - 2026-08-26: Node ESM (`"type": "module"`) requires relative import specifiers with `.js` extensions in emitted `dist/` (e.g. `from "./core/connection.js"`). Without them, `node scripts/assert-node-package.mjs` fails with `ERR_MODULE_NOT_FOUND` even though `tsc` and Bun tests pass.
+- 2026-08-29: Removed pg-boss after Phase 3 confirmed that its lifecycle and schema added coupling without supplying the resque runtime. Migrations now ship as numbered SQL files, execute under an advisory lock in one transaction, and are included in the npm package.
+- 2026-08-29: `connect()` must execute `SELECT 1`; constructing `pg.Pool` is lazy and does not prove credentials, routing, or database availability.
 - 2026-08-29: Phase 3 restored node-resque's optional `QueueOptions.queue` field. Queue methods still take an explicit queue name, but retaining the constructor field lets existing typed call sites migrate without an excess-property error.

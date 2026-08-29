@@ -7,10 +7,10 @@ describe("connection error", () => {
       const brokenConnection = new Connection({
         host: "127.0.0.1",
         port: 1,
-        database: "pgboss_queue_test",
+        database: "pg_queue_test",
         user: "postgres",
         password: "postgres",
-        schema: "pgboss_queue_test",
+        schema: "pg_queue_test",
       });
 
       let sawErrorEvent = false;
@@ -32,6 +32,10 @@ describe("connection error", () => {
             /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|connect/i,
           );
           expect(sawErrorEvent).toBe(true);
+          expect(brokenConnection.connected).toBe(false);
+          expect(() => brokenConnection.pool).toThrow(
+            "Connection is not connected",
+          );
           resolve();
         });
     });

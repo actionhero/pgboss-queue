@@ -18,7 +18,7 @@ CI must exist **before** Queue/Worker code. An empty `expect(true)` that never o
 ### Package
 
 - `package.json`
-  - `name`: `pgboss-queue`
+  - `name`: `pg-queue`
   - `version`: `0.0.1`
   - `type`: `"module"`
   - `main` / `types`: `dist/index.js` / `dist/index.d.ts`
@@ -27,13 +27,13 @@ CI must exist **before** Queue/Worker code. An empty `expect(true)` that never o
   - `license`: `Apache-2.0`
   - `scripts`: `"test": "bun test --max-concurrency=1"`, `"test:node-package": "node scripts/assert-node-package.mjs"`, `build`, `lint`, `format` (docs scripts wait for Phase 9)
   - `devDependencies`: `typescript`, `@types/node`, `@types/pg`, `@biomejs/biome`, `@types/bun`
-  - `dependencies`: `pg` now (smoke test uses it). Add `pg-boss` in Phase 2 if you want to keep this PR smaller — either is fine as long as CI is green.
+  - `dependencies`: `pg` (smoke test and queue storage use it).
 - `tsconfig.json` — `strict`, `noImplicitAny: true`, `ES2022`, `moduleResolution: bundler` or `nodenext`, `declaration`, `outDir: dist`, `rootDir: src`. `tsconfig.test.json` typechecks `__tests__` with `noEmit` (so implicit `any` in tests fails `build` too).
 - `biome.json` — match keryx reasonably (indent 2, no unused imports). `suspicious/noExplicitAny` is `error` so `: any` and `as any` fail `lint`.
 - `.gitignore` — `node_modules`, `dist`, `.env`, `docs/.vitepress/dist`, `*.log`
 - `LICENSE` — Apache-2.0
 - `.nvmrc` or `.node-version` — `26`
-- `.env.example` — `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgboss_queue_test`
+- `.env.example` — `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pg_queue_test`
 
 ### Source stub
 
@@ -51,7 +51,7 @@ No `docker-compose.yml`. CI starts Postgres as a GitHub Actions service. Locally
 `.env.example` is the only local-DB contract:
 
 ```
-DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgboss_queue_test
+DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pg_queue_test
 ```
 
 ### Test harness (not a dummy assert)
@@ -59,7 +59,7 @@ DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/pgboss_queue_test
 `__tests__/utils/specHelper.ts` — the same helper later phases grow. In this phase it must:
 
 - Read `DATABASE_URL` (fail the suite with a clear message if unset)
-- Export `connectionDetails`, `timeout` (e.g. 500), `queue` (a default queue name), `schema` (default `pgboss_queue_test`)
+- Export `connectionDetails`, `timeout` (e.g. 500), `queue` (a default queue name), `schema` (default `pg_queue_test`)
 - `connect()` / `disconnect()` against `pg.Pool`
 - `cleanup()` — no-op or `SELECT 1` until Phase 2 adds truncate/migrate
 - `popFromQueue()` — throw `"not implemented"` until Phase 3 (do not silently return null)
@@ -76,7 +76,7 @@ Do **not** ship only `expect(true).toBe(true)`. Tests use `bun:test`. Node compa
 
 `.github/workflows/test.yaml` is the product gate from this PR onward. Jobs: `lint`, `build`, `test` (Postgres 16 service, **Bun `bun:test`**), `node-package` (Node 26 imports the compiled package), `complete`.
 
-- `test`: `bun run test` with `DATABASE_URL=postgres://postgres:postgres@localhost:5432/pgboss_queue_test`
+- `test`: `bun run test` with `DATABASE_URL=postgres://postgres:postgres@localhost:5432/pg_queue_test`
 - `node-package`: `actions/setup-node` from `.nvmrc` (26), `bun run build`, then **`node scripts/assert-node-package.mjs`** (not `bun run`; no Postgres)
 
 See the workflow file for the YAML. Do not duplicate a second test pipeline in Phase 10.
@@ -120,3 +120,4 @@ A compiling package, a shared `specHelper`, and CI that will run every subsequen
 - 2026-08-26: `noImplicitAny` is set on both `tsconfig.json` and `tsconfig.test.json` so relaxing `strict` later still bans implicit `any` in src and tests.
 - 2026-08-26: Required checks on `main` should be `complete` and `Cursor Bugbot`. The cloud agent GitHub token is not a repo admin (403 on branch protection and rulesets), so a maintainer must set that in the GitHub UI.
 - 2026-08-26: Phase 2 filled `specHelper.cleanup()` / `migrate()` / `dropSchema()` and added `pg-boss`. Smoke test remains valid; connection suite uses `*.test.ts` filenames because Bun will not discover bare `connection.ts`.
+- 2026-08-29: The project was renamed to `pg-queue` and pg-boss was removed. `pg` is now the only runtime dependency; bundled SQL migrations are included in package files.

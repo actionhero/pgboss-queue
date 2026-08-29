@@ -26,10 +26,7 @@ async function seedActiveWorker(
   includeId = true,
 ): Promise<string> {
   await target.enqueue(queueName, "slowJob", args);
-  const jobs = await target.connection.boss.fetch<ParsedJob>(queueName, {
-    batchSize: 1,
-  });
-  const job = jobs[0];
+  const job = await target.connection.fetchJob<ParsedJob>(queueName);
   if (!job) throw new Error("expected an active job");
   await target.connection.query(
     `INSERT INTO ${specHelper.schema}.pgrq_workers (name, queues, working_on)
@@ -232,7 +229,7 @@ describe("queue", () => {
       const ids = async () => {
         const result = await queue.connection.query<{ id: string }>(
           `SELECT id
-           FROM ${specHelper.schema}.job
+           FROM ${specHelper.schema}.pgrq_jobs
            WHERE name = $1 AND state = 'created'
            ORDER BY created_on, id`,
           [specHelper.queue],
@@ -401,7 +398,7 @@ describe("queue", () => {
         for (let id = 1; id <= 3; id += 1) {
           await queue.enqueue("busted-queue", "busted_job", [id, 2, 3]);
           await queue.connection.query(
-            `UPDATE ${specHelper.schema}.job
+            `UPDATE ${specHelper.schema}.pgrq_jobs
              SET state = 'failed',
                  completed_on = now() + make_interval(secs => $1),
                  output = $2::jsonb
@@ -562,7 +559,7 @@ describe("queue", () => {
       await client.query("BEGIN");
       await client.query(
         `SELECT name
-         FROM ${specHelper.schema}.queue
+         FROM ${specHelper.schema}.pgrq_queues
          WHERE name = 'serialized'
          FOR UPDATE`,
       );
@@ -585,7 +582,7 @@ describe("queue", () => {
     test("does not drop jobs that remain after delQueue", async () => {
       await queue.enqueue("busy", "job", [1]);
       await queue.connection.query(
-        `UPDATE ${specHelper.schema}.job
+        `UPDATE ${specHelper.schema}.pgrq_jobs
          SET state = 'active'
          WHERE name = 'busy'`,
       );
@@ -597,12 +594,11 @@ describe("queue", () => {
 
     test("forceCleanWorker fails the original active job", async () => {
       expect(await queue.enqueue("stuck", "slowJob", [{ a: 1 }])).toBe(true);
-      const fetched = await queue.connection.boss.fetch<{
+      const job = await queue.connection.fetchJob<{
         class: string;
         queue: string;
         args: unknown[];
-      }>("stuck", { batchSize: 1 });
-      const job = fetched[0];
+      }>("stuck");
       if (!job) throw new Error("expected an active job");
       await queue.connection.query(
         `INSERT INTO ${specHelper.schema}.pgrq_workers (name, queues, working_on)
@@ -628,7 +624,7 @@ describe("queue", () => {
 
       const active = await queue.connection.query<{ count: string }>(
         `SELECT count(*)::text AS count
-         FROM ${specHelper.schema}.job
+         FROM ${specHelper.schema}.pgrq_jobs
          WHERE name = 'stuck' AND state = 'active'`,
       );
       expect(Number(active.rows[0]?.count)).toBe(0);
@@ -637,11 +633,18 @@ describe("queue", () => {
     test("forceCleanWorker without a job id fails only one matching active job", async () => {
       await queue.enqueue("twins", "slowJob", [1]);
       await queue.enqueue("twins", "slowJob", [1]);
-      const fetched = await queue.connection.boss.fetch<{
-        class: string;
-        queue: string;
-        args: unknown[];
-      }>("twins", { batchSize: 2 });
+      const fetched = await Promise.all([
+        queue.connection.fetchJob<{
+          class: string;
+          queue: string;
+          args: unknown[];
+        }>("twins"),
+        queue.connection.fetchJob<{
+          class: string;
+          queue: string;
+          args: unknown[];
+        }>("twins"),
+      ]);
       expect(fetched).toHaveLength(2);
       await queue.connection.query(
         `INSERT INTO ${specHelper.schema}.pgrq_workers (name, queues, working_on)
@@ -660,7 +663,7 @@ describe("queue", () => {
       expect(await queue.failedCount()).toBe(1);
       const active = await queue.connection.query<{ count: string }>(
         `SELECT count(*)::text AS count
-         FROM ${specHelper.schema}.job
+         FROM ${specHelper.schema}.pgrq_jobs
          WHERE name = 'twins' AND state = 'active'`,
       );
       expect(Number(active.rows[0]?.count)).toBe(1);
