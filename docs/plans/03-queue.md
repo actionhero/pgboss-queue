@@ -137,3 +137,4 @@ Recommended split:
 - 2026-08-29: `pgrq_stats` stores numeric counters, but `Queue.stats()` stringifies them to retain node-resque's Redis `MGET` response shape (`{ processed: "2", failed: "1" }`).
 - 2026-08-29: Bugbot: an in-process `knownQueues` cache survived `delQueue` on another `Queue` instance, so later `send` skipped `createQueue`. `ensureQueue` now always checks pg-boss and retries once on `Queue does not exist`.
 - 2026-08-29: Bugbot: `delQueue` only skipped `delete_queue` when `active` rows remained, so a concurrent `created` insert could be dropped. It now locks the pg-boss queue row, deletes non-active jobs, and drops the queue only when no rows remain.
+- 2026-08-29: Bugbot: `forceCleanWorker` inserted a second `failed` row and left the original job `active`. It now updates the in-flight job to `failed` (by id when recorded, otherwise by matching `data`) and only inserts if no active row exists.

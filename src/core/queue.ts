@@ -31,6 +31,8 @@ export interface ParsedWorkerPayload {
   worker: string;
   /** Encoded job payload. */
   payload: ParsedJob;
+  /** pg-boss job id recorded by the worker, when present. */
+  id?: string;
 }
 
 /** Failed-job representation returned by Queue inspection methods. */
@@ -641,6 +643,42 @@ export class Queue extends EventEmitter {
       failed_at: new Date().toString(),
     };
 
+    await this.failActiveJob(working, errorPayload);
+    await this.connection.incrStat("failed");
+    return errorPayload;
+  }
+
+  /**
+   * Mark the worker's in-flight pg-boss job failed in place.
+   *
+   * @param working - Worker assignment, including optional job id.
+   * @param errorPayload - Resque failure payload stored in `output`.
+   */
+  private async failActiveJob(
+    working: ParsedWorkerPayload,
+    errorPayload: ErrorPayload,
+  ): Promise<void> {
+    const updated = await this.connection.query(
+      `UPDATE ${this.connection.schema}.job
+       SET state = 'failed',
+           completed_on = now(),
+           output = $3::jsonb
+       WHERE name = $1
+         AND state = 'active'
+         AND (
+           ($4::uuid IS NOT NULL AND id = $4)
+           OR ($4::uuid IS NULL AND data = $2::jsonb)
+         )`,
+      [
+        working.queue,
+        JSON.stringify(working.payload),
+        JSON.stringify(errorPayload),
+        working.id ?? null,
+      ],
+    );
+    if ((updated.rowCount ?? 0) > 0) return;
+    if (working.id) return;
+
     await this.ensureQueue(working.queue);
     await this.connection.query(
       `INSERT INTO ${this.connection.schema}.job
@@ -652,8 +690,6 @@ export class Queue extends EventEmitter {
         JSON.stringify(errorPayload),
       ],
     );
-    await this.connection.incrStat("failed");
-    return errorPayload;
   }
 
   /**
@@ -910,6 +946,7 @@ function parseWorkerPayload(
     queue: typeof value.queue === "string" ? value.queue : payload.queue,
     worker: typeof value.worker === "string" ? value.worker : fallbackWorker,
     payload,
+    id: typeof value.id === "string" ? value.id : undefined,
   };
 }
 

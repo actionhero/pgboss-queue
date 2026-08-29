@@ -430,6 +430,45 @@ describe("queue", () => {
       expect(await queue.length("busy")).toBe(1);
     });
 
+    test("forceCleanWorker fails the original active job", async () => {
+      expect(await queue.enqueue("stuck", "slowJob", [{ a: 1 }])).toBe(true);
+      const fetched = await queue.connection.boss.fetch<{
+        class: string;
+        queue: string;
+        args: unknown[];
+      }>("stuck", { batchSize: 1 });
+      const job = fetched[0];
+      if (!job) throw new Error("expected an active job");
+      await queue.connection.query(
+        `INSERT INTO ${specHelper.schema}.pgrq_workers (name, queues, working_on)
+         VALUES ('workerA', $1, $2::jsonb)`,
+        [
+          "stuck",
+          JSON.stringify({
+            id: job.id,
+            run_at: new Date().toString(),
+            queue: "stuck",
+            worker: "workerA",
+            payload: job.data,
+          }),
+        ],
+      );
+
+      const errorPayload = await queue.forceCleanWorker("workerA");
+      expect(errorPayload?.exception).toBe("Worker Timeout (killed manually)");
+      expect(await queue.failedCount()).toBe(1);
+      const failed = await queue.failed(0, -1);
+      expect(failed[0]?.id).toBe(job.id);
+      expect(failed[0]?.payload.args).toEqual([{ a: 1 }]);
+
+      const active = await queue.connection.query<{ count: string }>(
+        `SELECT count(*)::text AS count
+         FROM ${specHelper.schema}.job
+         WHERE name = 'stuck' AND state = 'active'`,
+      );
+      expect(Number(active.rows[0]?.count)).toBe(0);
+    });
+
     test("can list running workers", async () => {
       await queue.connection.query(
         `INSERT INTO ${specHelper.schema}.pgrq_workers (name, queues)
