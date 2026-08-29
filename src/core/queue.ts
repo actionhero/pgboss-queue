@@ -786,9 +786,16 @@ export class Queue extends EventEmitter {
     return this.connection.currentLeader();
   }
 
-  /** @returns Named processed/failed counters from the metadata table. */
-  async stats(): Promise<Record<string, number>> {
-    return this.connection.getStats();
+  /**
+   * Read queue counters using node-resque's string-valued response shape.
+   *
+   * @returns Named processed/failed counters as decimal strings.
+   */
+  async stats(): Promise<Record<string, string>> {
+    const stats = await this.connection.getStats();
+    return Object.fromEntries(
+      Object.entries(stats).map(([name, value]) => [name, String(value)]),
+    );
   }
 
   /** @returns Stable metadata slot name used for scheduler leadership. */

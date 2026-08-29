@@ -237,7 +237,7 @@ describe("queue", () => {
     test("can load stats", async () => {
       await queue.connection.incrStat("failed", 1);
       await queue.connection.incrStat("processed", 2);
-      expect(await queue.stats()).toEqual({ failed: 1, processed: 2 });
+      expect(await queue.stats()).toEqual({ failed: "1", processed: "2" });
     });
 
     describe("locks", () => {
