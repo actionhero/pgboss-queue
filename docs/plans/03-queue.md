@@ -140,3 +140,4 @@ Recommended split:
 - 2026-08-29: Bugbot: `forceCleanWorker` inserted a second `failed` row and left the original job `active`. It now updates the in-flight job to `failed` (by id when recorded, otherwise by matching `data`) and only inserts if no active row exists.
 - 2026-08-29: Bugbot: the data-only fallback could fail every identical `active` payload. The update now selects a single matching row (`LIMIT 1 … FOR UPDATE`).
 - 2026-08-29: Bugbot: `delayedAt` omitted `start_after > now()`, so a timestamp whose second had arrived still listed jobs that `length`/`queued` already treated as ready. It now uses the same delayed filter as `timestamps` / `scheduledAt` / `delDelayed`.
+- 2026-08-29: Bugbot: delayed duplicate lock keys embedded the encoded JSON and overflowed the `pgrq_locks` btree for large payloads. Keys now use `sha256(encoded)` plus the timestamp second.

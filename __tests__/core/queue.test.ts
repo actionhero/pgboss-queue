@@ -94,6 +94,19 @@ describe("queue", () => {
       expect((await queue.delayedAt(timestamp)).tasks).toHaveLength(1);
     });
 
+    test("can schedule a delayed job whose payload exceeds a btree key", async () => {
+      const timestamp = delayedBase();
+      const args = ["x".repeat(8_000)];
+      expect(
+        await queue.enqueueAt(timestamp, specHelper.queue, "someJob", args),
+      ).toBe(true);
+      await expect(
+        queue.enqueueAt(timestamp, specHelper.queue, "someJob", args),
+      ).rejects.toThrow(
+        "Job already enqueued at this time with same arguments",
+      );
+    });
+
     test("will not enqueue a delayed job at the same time with matching params with error suppressed", async () => {
       const timestamp = delayedBase();
       await queue.enqueueAt(timestamp, specHelper.queue, "someJob", [1, 2, 3]);

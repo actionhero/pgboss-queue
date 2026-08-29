@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { hostname } from "node:os";
 import type { QueryResultRow } from "pg";
@@ -926,7 +927,8 @@ function parseFiniteNumber(value: number | string, name: string): number {
 }
 
 function delayedLockKey(encoded: string, second: number): string {
-  return `timestamps:${encoded}:delayed:${second}`;
+  const digest = createHash("sha256").update(encoded).digest("hex");
+  return `timestamps:${digest}:delayed:${second}`;
 }
 
 function parseJob(value: unknown, fallbackQueue: string): ParsedJob {
